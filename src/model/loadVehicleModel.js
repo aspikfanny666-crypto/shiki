@@ -29,32 +29,49 @@ export function createGLTFLoader(renderer) {
 }
 
 /**
- * Loads the GLB. Resolves with `{ ok: true, gltf }` or, when the file is
- * simply not there yet, `{ ok: false, reason: 'missing', error }` so the
- * caller can fall back to the placeholder instead of blowing up.
+ * Loads the GLB. Accepts one URL or a list of candidates — when the page is
+ * hosted somewhere that resolves relative paths differently (a published
+ * artifact URL without a trailing slash, for example), the next candidate is
+ * tried instead of failing.
+ *
+ * Resolves with `{ ok: true, gltf }`, or `{ ok: false, reason: 'missing' }` so
+ * the caller can fall back to the placeholder instead of blowing up.
  */
 export async function loadVehicleModel(url, { renderer, onProgress } = {}) {
   const loader = createGLTFLoader(renderer);
   const startedAt = performance.now();
+  const attempts = [];
 
-  try {
-    const gltf = await loader.loadAsync(url, onProgress);
-    return {
-      ok: true,
-      gltf,
-      url,
-      loadMs: Math.round(performance.now() - startedAt),
-    };
-  } catch (error) {
-    const missing =
-      /404|Failed to fetch|NetworkError|Unexpected token|not valid JSON/i.test(
-        String(error?.message ?? error),
-      );
-    return {
-      ok: false,
-      reason: missing ? 'missing' : 'error',
-      url,
-      error,
-    };
+  const candidates = (Array.isArray(url) ? url : [url]).filter(Boolean);
+
+  for (const candidate of candidates) {
+    // A candidate may also be raw bytes — a page that ships the GLB inline
+    // instead of fetching it (a published artifact, where only standard web
+    // media types are served, embeds it in a script).
+    const isBytes = candidate instanceof ArrayBuffer || ArrayBuffer.isView(candidate);
+    try {
+      const gltf = isBytes
+        ? await loader.parseAsync(candidate instanceof ArrayBuffer ? candidate : candidate.buffer, '')
+        : await loader.loadAsync(candidate, onProgress);
+      return {
+        ok: true,
+        gltf,
+        url: isBytes ? 'embedded (parsed)' : candidate,
+        attempts,
+        loadMs: Math.round(performance.now() - startedAt),
+      };
+    } catch (error) {
+      attempts.push({ url: isBytes ? 'embedded (parsed)' : candidate, error: String(error?.message ?? error).slice(0, 120) });
+    }
   }
+
+  const lastError = attempts.at(-1)?.error ?? '';
+  const missing = /404|Failed to fetch|NetworkError|Unexpected token|not valid JSON/i.test(lastError);
+  return {
+    ok: false,
+    reason: missing ? 'missing' : 'error',
+    url: candidates[0],
+    attempts,
+    error: lastError,
+  };
 }

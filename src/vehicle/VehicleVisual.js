@@ -55,16 +55,17 @@ export class VehicleVisual {
     if (result.ok) {
       this.gltf = result.gltf;
       this.model = result.gltf.scene;
-      this.source = { kind: 'glb', url, loadMs: result.loadMs, bytes: result.bytes ?? null };
+      // record the candidate that actually resolved, not the list we tried
+      this.source = { kind: 'glb', url: result.url, loadMs: result.loadMs, attempts: result.attempts ?? [] };
       const extras = result.gltf.parser?.json?.asset?.extras;
       if (extras) this.credit = { title: extras.title, author: extras.author, license: extras.license, source: extras.source };
     } else {
       this.model = createPlaceholderVehicle();
       this.gltf = { animations: [] };
       this.isPlaceholder = true;
-      this.source = { kind: 'placeholder', url, reason: result.reason, error: result.error };
+      this.source = { kind: 'placeholder', url: result.url, reason: result.reason, error: result.error, attempts: result.attempts ?? [] };
       this.warnings.push(
-        `"${url}" could not be loaded (${result.reason}). A clearly-labelled PLACEHOLDER_ mesh is shown instead.`,
+        `"${result.url}" could not be loaded (${result.reason}). A clearly-labelled PLACEHOLDER_ mesh is shown instead.`,
       );
     }
 

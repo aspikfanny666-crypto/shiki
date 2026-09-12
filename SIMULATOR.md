@@ -186,6 +186,28 @@ __BMW__.physics.telemetry      // speed, rpm, gear, wheels on ground, drag…
 __BMW__.physics.describe()     // what the physics vehicle is built from
 ```
 
+## Publishing it as a single page
+
+`npm run build` produces `dist/` with relative asset paths, so it can be hosted
+from any sub-directory. For hosts that only serve standard web media types (a
+published Claude artifact, for instance) the GLB can travel inside a script
+instead of being fetched:
+
+```bash
+npm run build
+node -e "const b=require('fs').readFileSync('public/models/bmw-f90.glb').toString('base64');
+         require('fs').writeFileSync('model.js', 'window.__BMW_MODEL__=\"'+b+'\";')"
+```
+
+Then load `model.js` before the bundle. `main.js` picks the global up, turns it
+into a `blob:` URL and hands that to the loader — the same code path as a
+fetched file.
+
+If WebAssembly is refused by the host's Content-Security-Policy (no
+`wasm-unsafe-eval`), Rapier cannot start; the page then runs `KinematicVehicle`
+instead — the same drivetrain and steering law, integrated as a bicycle model,
+with no collisions or suspension travel — and the HUD says so.
+
 ## Model attribution
 
 "BMW M5 CS (F90)" by **fvrenbld**, licensed **CC BY 4.0** —

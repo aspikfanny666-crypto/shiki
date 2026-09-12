@@ -3,8 +3,14 @@
 ## bmw-f90.glb — the vehicle model the simulator loads
 
 ```
-public/models/bmw-f90.glb      12.8 MB, glTF binary, 305,984 triangles
+public/models/bmw-f90.glb      7.8 MB, glTF binary, 305,984 triangles
 ```
+
+The file in the repo has been through `gltf-transform prune` (it carried a UV
+set for 89 materials that have no textures at all) and `weld` (duplicate
+vertices merged: 283,444 → 245,822). That is 12.8 MB → 7.8 MB with **exactly
+the same 305,984 triangles** and identical measurements — verified by re-running
+the import analysis and the driving tests against both files.
 
 **What this file actually is**
 

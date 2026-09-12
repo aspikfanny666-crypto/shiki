@@ -69,6 +69,12 @@ export class PhysicsWorld {
     return body;
   }
 
+  /** One fixed step, for deterministic test runs that bypass the frame clock. */
+  stepOnce() {
+    this.world.step();
+    this.steppedTime += this.world.timestep;
+  }
+
   /**
    * Fixed-step integration with an accumulator, so the simulation is
    * frame-rate independent. At most 5 substeps per frame: on a slow device the

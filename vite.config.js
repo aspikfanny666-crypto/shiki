@@ -3,6 +3,8 @@ import { defineConfig } from 'vite';
 // The repository also hosts the is-a.dev domain registry; `domains/` holds tens
 // of thousands of JSON files, so it is kept out of the dev server's watcher.
 export default defineConfig({
+  // relative asset paths so the build can be hosted from any subdirectory
+  base: './',
   server: {
     host: '127.0.0.1',
     port: 5173,

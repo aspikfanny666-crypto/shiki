@@ -33,7 +33,8 @@ export class Hud {
         <span class="lamp" data-lamp-lights>LIGHTS</span>
         <span class="lamp" data-lamp-air>AIR</span>
       </div>
-      <div class="hud-foot"><span data-cam>chase</span><span data-fps>60 fps</span></div>`;
+      <div class="hud-foot"><span data-cam>chase</span><span data-fps>60 fps</span></div>
+      <div class="hud-notice" data-notice hidden></div>`;
     container.appendChild(this.el);
 
     const q = (sel) => this.el.querySelector(sel);
@@ -52,8 +53,15 @@ export class Hud {
       air: q('[data-lamp-air]'),
       cam: q('[data-cam]'),
       fps: q('[data-fps]'),
+      notice: q('[data-notice]'),
     };
     this._last = {};
+  }
+
+  /** One-line banner under the HUD (used when physics runs in fallback mode). */
+  setNotice(text) {
+    this.refs.notice.textContent = text ?? '';
+    this.refs.notice.hidden = !text;
   }
 
   #text(ref, value) {

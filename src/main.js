@@ -8,6 +8,8 @@ import { Environment } from './scene/Environment.js';
 import { CameraRig } from './scene/CameraRig.js';
 import { VehicleVisual } from './vehicle/VehicleVisual.js';
 import { VehiclePhysics } from './vehicle/VehiclePhysics.js';
+import { KinematicVehicle } from './vehicle/KinematicVehicle.js';
+import { NullPhysicsWorld } from './scene/NullPhysicsWorld.js';
 import { VehicleLights } from './vehicle/VehicleLights.js';
 import { Controls } from './input/Controls.js';
 import { reportToConsole, buildReportJSON } from './model/reportToConsole.js';
@@ -28,9 +30,36 @@ const { renderer, scene, camera, axes } = scene3d;
 
 // ---------------------------------------------------------------- model ----
 setBootMessage('loading BMW M5 F90…');
+/**
+ * The GLB normally comes from public/models. A host that only serves standard
+ * web media types (a published artifact) can instead ship it as base64 in a
+ * plain script that sets `window.__BMW_MODEL__`; it is decoded here and handed
+ * to the loader as bytes.
+ */
+function embeddedModelBytes() {
+  const base64 = window.__BMW_MODEL__;
+  if (typeof base64 !== 'string' || base64.length < 1024) return null;
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  // Hand the loader a blob: URL rather than the raw buffer, so the embedded
+  // model goes through exactly the same load path as a fetched file.
+  return {
+    url: URL.createObjectURL(new Blob([bytes], { type: 'model/gltf-binary' })),
+    buffer: bytes.buffer,
+  };
+}
+
+// Candidates, so the same bundle works from a dev server, a sub-directory and
+// a published page whose URL has no trailing slash.
+const embedded = embeddedModelBytes();
+const modelSource = embedded
+  ? [embedded.url, embedded.buffer]
+  : [MODEL_URL, new URL(MODEL_URL, document.baseURI).href, new URL(MODEL_URL, import.meta.url).href, `/${MODEL_URL}`];
+
 const visual = new VehicleVisual();
 await visual.load({
-  url: MODEL_URL,
+  url: modelSource,
   renderer,
   onProgress: (e) => {
     if (e.lengthComputable) setBootMessage(`loading model — ${Math.round((e.loaded / e.total) * 100)}%`);
@@ -39,19 +68,31 @@ await visual.load({
 scene.add(visual.root);
 
 // --------------------------------------------------------------- physics ---
+// Rapier is WebAssembly. A strict Content-Security-Policy without
+// `wasm-unsafe-eval` refuses to instantiate it, so the page falls back to a
+// kinematic drive model instead of dying. Everything downstream is identical.
 setBootMessage('starting physics…');
-await RAPIER.init();
-const physicsWorld = new PhysicsWorld(RAPIER, scene);
+let rapierReady = false;
+try {
+  await RAPIER.init();
+  rapierReady = true;
+} catch (error) {
+  console.warn('Rapier (WebAssembly) could not start — falling back to the kinematic vehicle model.', error);
+}
+
+const physicsWorld = rapierReady ? new PhysicsWorld(RAPIER, scene) : new NullPhysicsWorld(scene);
 const environment = new Environment(physicsWorld, scene, { quality: settings.get('quality') });
 
-const physics = new VehiclePhysics(RAPIER, physicsWorld.world, visual);
+const physics = rapierReady
+  ? new VehiclePhysics(RAPIER, physicsWorld.world, visual)
+  : new KinematicVehicle(visual);
 const lights = new VehicleLights(visual, { settings });
-const SPAWN = new Vector3(0, 0.08, 0);
+const SPAWN = new Vector3(0, rapierReady ? 0.08 : 0, 0);
 physics.reset(SPAWN);
 
 // ------------------------------------------------------------- reporting ---
 reportToConsole(visual);
-console.group('%c14. VehiclePhysics (Rapier)', 'color:#7dd3fc;font-weight:700');
+console.group(`%c14. ${rapierReady ? 'VehiclePhysics (Rapier)' : 'KinematicVehicle (no WebAssembly here)'}`, 'color:#7dd3fc;font-weight:700');
 console.log(physics.describe());
 console.log('material upgrades applied:', visual.materialUpgrades);
 console.log('steering wheel pivot:', visual.steeringWheel);
@@ -59,6 +100,7 @@ console.groupEnd();
 
 // ------------------------------------------------------------------- UI ----
 const hud = new Hud(container);
+if (!rapierReady) hud.setNotice('simplified physics — WebAssembly blocked');
 const debugPanel = new DebugPanel(container);
 debugPanel.render(visual, physics);
 debugPanel.el.hidden = !settings.get('debug');
@@ -156,7 +198,7 @@ renderer.setAnimationLoop(() => {
 // -------------------------------------------------------------- debugging ---
 window.__BMW__ = {
   visual, physics, physicsWorld, environment, lights, controls, settings,
-  scene, camera, rig, hud, renderer, RAPIER,
+  scene, camera, rig, hud, renderer, RAPIER, rapierReady,
   report: buildReportJSON(visual),
   dumpHierarchy: () => console.log(window.__BMW__.report.tree),
   drive: (throttle = 0, brake = 0, steer = 0, handbrake = false) => {
@@ -174,7 +216,7 @@ window.__BMW__ = {
     physics.setInput({ throttle: 0, brake: 0, steer: 0, handbrake: false, ...input });
     for (let i = 0; i < Math.round(seconds / step); i++) {
       physics.update(step);
-      physicsWorld.world.step();
+      physicsWorld.stepOnce();
       const time = (i + 1) * step;
       if (time % sampleEvery < step) {
         const tel = physics.telemetry;
