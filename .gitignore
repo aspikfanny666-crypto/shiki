@@ -132,3 +132,16 @@ dist
 # Custom
 .DS_Store
 *.js
+
+# --- BMW F90 simulator ---
+# The registry part of this repo ignores *.js globally (line above); the
+# simulator sources are real project files and must be tracked.
+!src/**/*.js
+!vite.config.js
+dist/
+.vite/
+# The BMW M5 CS (F90) model is CC BY 4.0 (author: fvrenbld), so it is kept in
+# the repo with its attribution — see public/models/README.md.
+# decoder files copied from node_modules by scripts/copy-decoders.mjs
+public/draco/
+public/basis/
