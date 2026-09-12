@@ -1,13 +1,9 @@
-/** Debug overlay: what loaded, what was detected, and live physics telemetry. */
+/** Debug overlay: the model import report. Live telemetry lives in Hud.js. */
 export class DebugPanel {
   constructor(container) {
     this.el = document.createElement('div');
     this.el.className = 'debug-panel';
     container.appendChild(this.el);
-
-    this.hud = document.createElement('div');
-    this.hud.className = 'hud';
-    container.appendChild(this.hud);
 
     this.controls = document.createElement('div');
     this.controls.className = 'debug-controls';
@@ -102,28 +98,6 @@ export class DebugPanel {
       ${visual.warnings.length ? `<h2>Warnings</h2><ul class="warns">${visual.warnings.map((w) => `<li>${w}</li>`).join('')}</ul>` : ''}
       <div class="hint">Full hierarchy dump in the console · <code>window.__BMW__</code></div>
     `;
-  }
-
-  /** Live telemetry, drawn as a separate HUD so the panel is not rebuilt. */
-  renderHud(t, { fps, camera }) {
-    const gearClass = t.gear === 'R' ? 'warn' : '';
-    this.hud.innerHTML = `
-      <div class="speed"><b>${Math.abs(Math.round(t.speedKmh))}</b><span>km/h</span></div>
-      <div class="gauges">
-        <div class="gauge"><span>GEAR</span><b class="${gearClass}">${t.gear}${t.shifting ? '…' : ''}</b></div>
-        <div class="gauge"><span>RPM</span><b>${Math.round(t.rpm)}</b></div>
-        <div class="gauge"><span>STEER</span><b>${t.steeringDeg.toFixed(0)}°</b></div>
-        <div class="gauge"><span>GROUND</span><b>${t.wheelsOnGround}/4</b></div>
-        <div class="gauge"><span>DRAG</span><b>${Math.round(t.dragN)} N</b></div>
-        <div class="gauge"><span>FPS</span><b>${fps.toFixed(0)}</b></div>
-      </div>
-      <div class="rpm-bar"><i style="width:${Math.min(100, (t.rpm / 7200) * 100).toFixed(1)}%"></i></div>
-      <div class="pedals">
-        <span class="pedal ${t.throttle > 0 ? 'on' : ''}">GAS</span>
-        <span class="pedal ${t.brake > 0 ? 'on brake' : ''}">BRAKE</span>
-        <span class="pedal ${t.handbrake ? 'on brake' : ''}">HAND</span>
-        <span class="pedal">CAM: ${camera}</span>
-      </div>`;
   }
 
   addButton(label, onClick) {

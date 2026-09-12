@@ -16,8 +16,43 @@ glTF model. `npm run dev`, then open http://localhost:5173.
 | `A` `D` / `←` `→` | steer |
 | `Space` | handbrake (locks the rear axle) |
 | `R` | reset the car |
-| `C` | camera: follow → hood → orbit |
-| touch | on-screen pedals and steering appear automatically on touch devices; the debug panel can force them on for testing |
+| `C` | camera: chase → close → hood → cockpit → free |
+| `L` | headlights |
+| `Z` / `X` | left / right indicator |
+
+On touch devices an on-screen pad appears automatically: steering arrows, GAS
+and BRAKE pedals, handbrake, a latching **R** for reverse (with the pedals
+swapped so GAS drives backwards), plus camera, lights and reset. The pedals can
+be moved to the left thumb in Settings → Controls.
+
+Buttons cannot stick: each one captures its pointer and releases on
+`pointerup`, `pointercancel` and `lostpointercapture`, and a global
+`pointerup` plus tab-blur clears anything still held.
+
+## Camera
+
+Five modes, cycled with `C` or the on-screen CAM button:
+
+| Mode | What it does |
+|---|---|
+| chase | third person, pulls back and widens the lens with speed |
+| close | tighter and lower, for a stronger sense of speed |
+| hood | on the bonnet, looking down the road |
+| cockpit | driver's eye, behind the real steering wheel |
+| free | orbit/debug camera (drag to look, wheel to zoom) |
+
+The chase cameras smooth position and aim with a frame-rate independent
+exponential, lean under acceleration and dive under braking (driven by the
+*measured* acceleration, so a collision moves the camera too), swing round when
+reversing, clamp their offset so they can never end up inside the car or under
+the road, and pull back further on a portrait phone screen.
+
+## Settings
+
+The ⚙ panel (persisted in `localStorage`): graphics quality (low / medium /
+high), shadows, reflections, headlight beams, camera follow sensitivity,
+steering sensitivity, touch layout (pedals left or right), debug panel, plus
+reset-car, restore-defaults and the model attribution.
 
 ## Measured behaviour
 
@@ -88,6 +123,18 @@ VehicleVisual (root, follows the rigid body)
 └── RearRightWheelMount     → RearRightWheelSpin  → RearRightWheelVisual
 ```
 
+### Lights
+
+The GLB's headlights are merged into the body meshes and cannot be lit by
+changing a material, so `VehicleLights` adds a thin **light layer** (emissive
+lens quads plus glow sprites, positioned from the measured bounding box) as
+children of the vehicle root — the GLB geometry is never modified. Where the
+export did keep a usable material (`Brakelightm1Mtl` for the centre brake
+light, `Indicatorrf1Mtl` for the indicator) that material's emissive is driven
+directly. Headlights, DRLs, brake lights, reverse lights and blinking
+indicators are all wired to the telemetry. Real spot-light beams are available
+behind a setting (off by default).
+
 ### Rapier specifics worth knowing
 
 Three behaviours of Rapier's `DynamicRayCastVehicleController` are load-bearing
@@ -101,13 +148,30 @@ here and were each found by measurement:
 3. user forces (`addForce`) **persist across steps**, so drag and rolling
    resistance are reset every step before being re-applied.
 
-## Mobile
+## Environment
 
-* pixel ratio capped (1.5 on touch devices, 2 otherwise), antialias off on mobile;
-* one 1024/2048 shadow map whose shadow camera follows the car, so a small map
-  stays sharp; no self-shadowing, no post-processing;
-* frustum culling on for every mesh; 151 draw calls, no textures to stream;
-* on-screen pedals/steering with `touch-action: none` and pointer events.
+A 240 m asphalt pad with painted markings (dashed lanes, a start box, a skid
+pad, braking markers) baked into a single canvas texture, red/white kerbs and
+barrier posts as instanced meshes, Armco runs, concrete walls, five buildings,
+two ramps, two speed bumps and twenty knock-over cones — the cones are one
+InstancedMesh driven by twenty dynamic cylinder bodies. Collision geometry is
+cuboids and cylinders only.
+
+## Performance
+
+| | |
+|---|---|
+| draw calls | ~194 at medium (car 151 meshes + environment + shadow pass) |
+| triangles per frame | ~320k at medium, ~548k at high (car is 306k) |
+| shadows | one blob contact shadow always; the sun shadow casts from a **box proxy** at low/medium (12 triangles) and from the 47 large panels at high |
+| pixel ratio | capped at 1.0 / 1.5 / 2.0 by quality preset |
+| textures | none in the model; the asphalt and markings are two generated canvases |
+| physics | fixed 60 Hz step with an accumulator, max 5 substeps per frame |
+| post-processing | none |
+
+The shadow proxy is the single biggest saving: casting from every body panel
+pushes ~250k triangles through the shadow pass every frame, which is what makes
+a 300k-triangle car expensive on a phone.
 
 ## Debugging
 

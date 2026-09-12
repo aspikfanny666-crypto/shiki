@@ -20,6 +20,7 @@ export class Drivetrain {
     this.throttle = 0;
     this.direction = 1; // 1 forward, -1 reverse
     this.brakeWasReleased = true; // reverse only engages on a fresh brake press
+    this.lockReverse = false; // set while the on-screen R latch is engaged
   }
 
   get gearLabel() {
@@ -68,12 +69,12 @@ export class Drivetrain {
         this.gear = -1;
         this.direction = -1;
         this.brakeWasReleased = false;
-      } else if (throttle > 0.1 && this.gear === -1) {
+      } else if (throttle > 0.1 && this.gear === -1 && !this.lockReverse) {
         this.gear = 1;
         this.direction = 1;
       }
     }
-    if (this.gear === -1 && speedMps > 1.5) {
+    if (this.gear === -1 && speedMps > 1.5 && !this.lockReverse) {
       this.gear = 1;
       this.direction = 1;
     }

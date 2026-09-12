@@ -48,7 +48,10 @@ export class VehiclePhysics {
     this._q = new Quaternion();
     this._v = new Vector3();
     this._fwd = new Vector3();
+    this._right = new Vector3();
     this._euler = new Euler();
+    this._prevSpeed = 0;
+    this.forceReverse = false;
 
     this.spawn = { position: new Vector3(0, 0.08, 0), rotation: new Quaternion() };
     this.#create();
@@ -171,6 +174,31 @@ export class VehiclePhysics {
     Object.assign(this.input, input);
   }
 
+  /**
+   * Explicit reverse, for the on-screen R button. Engages only at a standstill,
+   * exactly like the automatic would; releasing it goes back to drive.
+   */
+  requestReverse(on) {
+    this.forceReverse = on;
+    if (on && Math.abs(this.speedMps) < 1.5) {
+      this.drivetrain.gear = -1;
+      this.drivetrain.brakeWasReleased = false;
+    } else if (!on && this.drivetrain.gear === -1 && Math.abs(this.speedMps) < 1.5) {
+      this.drivetrain.gear = 1;
+    }
+    return this.drivetrain.gear === -1;
+  }
+
+  /** Sideways velocity of the chassis, m/s — how much the car is sliding. */
+  get lateralSpeed() {
+    const v = this.body.linvel();
+    this._v.set(v.x, v.y, v.z);
+    const rot = this.body.rotation();
+    this._q.set(rot.x, rot.y, rot.z, rot.w);
+    this._right.set(1, 0, 0).applyQuaternion(this._q);
+    return this._v.dot(this._right);
+  }
+
   /** Signed forward speed in m/s (+ = driving forwards). */
   get speedMps() {
     const v = this.body.linvel();
@@ -190,8 +218,9 @@ export class VehiclePhysics {
     const speed = this.speedMps;
     const absSpeed = Math.abs(speed);
     const maxAngle = this.#maxSteerAngle(absSpeed);
-    const target = input.steer * maxAngle;
-    const rate = (input.steer === 0 ? steerCfg.returnRate : steerCfg.turnRate) * maxAngle;
+    const sensitivity = this.steeringSensitivity ?? 1;
+    const target = input.steer * maxAngle * Math.min(1, sensitivity);
+    const rate = (input.steer === 0 ? steerCfg.returnRate : steerCfg.turnRate * sensitivity) * maxAngle;
     const delta = target - this.steering;
     this.steering += Math.sign(delta) * Math.min(Math.abs(delta), rate * dt);
 
@@ -199,7 +228,16 @@ export class VehiclePhysics {
     const wheelRadius = this.visual.wheelRadius;
     const drivenIndex = this.wheelKeys.findIndex((k) => this.isDriven(k));
     const wheelAngular = speed / wheelRadius;
-    const drive = this.drivetrain.update(dt, input, wheelAngular, speed, wheelRadius);
+
+    // With the on-screen R latch the pedals swap round, so GAS drives the car
+    // backwards and BRAKE stops it — which is what a player expects after
+    // deliberately selecting reverse.
+    const swapped = this.forceReverse && this.drivetrain.gear === -1;
+    const pedals = swapped
+      ? { throttle: input.brake, brake: input.throttle }
+      : { throttle: input.throttle, brake: input.brake };
+    this.drivetrain.lockReverse = this.forceReverse;
+    const drive = this.drivetrain.update(dt, pedals, wheelAngular, speed, wheelRadius);
 
     const drivenCount = this.wheelKeys.filter((k) => this.isDriven(k)).length || 1;
     const perWheelForce = (drive.engineForce / drivenCount) * FORWARD_SIGN;
@@ -207,7 +245,7 @@ export class VehiclePhysics {
     // ---- brakes -------------------------------------------------------------
     const brakes = tuning.brakes;
     // In reverse gear the pedals swap: BRAKE drives backwards, GAS slows down.
-    const brakeInput = drive.direction === -1 ? input.throttle : input.brake;
+    const brakeInput = drive.direction === -1 ? pedals.throttle : pedals.brake;
     const frontBrake = brakeInput * brakes.maxBrakeForce;
     const rearBrake = brakeInput * brakes.maxBrakeForce * brakes.rearBias;
     const handbrake = input.handbrake ? brakes.handbrakeForce : 0;
@@ -240,9 +278,19 @@ export class VehiclePhysics {
     // ramp into orbit) put it back on the spawn point instead of falling forever
     if (this.body.translation().y < -5) this.reset();
 
+    // grip telemetry for the dashboard lamps
+    const lateral = this.lateralSpeed;
+    const decel = (this._prevSpeed - speed) / Math.max(dt, 1e-4); // m/s²
+    this._prevSpeed = speed;
+    const tractionLoss = Math.abs(lateral) > 1.4 && Math.abs(speed) > 2;
+    const absActive = braking && Math.abs(speed) > 2.5 && decel > 8.0;
+
     this.telemetry = {
       speedMps: speed,
       speedKmh: speed * 3.6,
+      lateralSpeed: lateral,
+      tractionLoss,
+      absActive,
       rpm: drive.rpm,
       gear: drive.gear,
       shifting: drive.shifting,
@@ -319,9 +367,14 @@ export class VehiclePhysics {
     return { dragN, rollingN };
   }
 
-  /** Copies the physics state onto the visual: body, wheels, steering, suspension. */
+  /**
+   * Copies the physics state onto the visual: body transform, wheel rotation,
+   * steering pivots, suspension travel and the steering wheel in the cabin.
+   */
   syncVisual() {
     if (!this.ready) return;
+    // the GLB's own steering wheel, geared through the steering ratio
+    this.visual.setSteeringWheelAngle?.(this.steering);
     const t = this.body.translation();
     const r = this.body.rotation();
     this.visual.root.position.set(t.x, t.y, t.z);
@@ -350,6 +403,11 @@ export class VehiclePhysics {
   }
 
   /** Puts the car back on its spawn point, upright and stopped. */
+  /**
+   * Full reset: position, rotation, both velocities, steering, gear, drivetrain
+   * state and the pedal inputs. Used by R and the on-screen button when the car
+   * is flipped or wedged.
+   */
   reset(position = this.spawn.position, heading = 0) {
     this.body.setTranslation({ x: position.x, y: position.y, z: position.z }, true);
     this._q.setFromEuler(this._euler.set(0, heading, 0));
@@ -358,6 +416,28 @@ export class VehiclePhysics {
     this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     this.drivetrain.reset();
     this.steering = 0;
+    this.forceReverse = false;
+    this._prevSpeed = 0;
+    this.input.throttle = 0;
+    this.input.brake = 0;
+    this.input.steer = 0;
+    this.input.handbrake = false;
+    if (this.controller) {
+      for (let i = 0; i < this.wheelKeys.length; i++) {
+        this.controller.setWheelEngineForce(i, 0);
+        this.controller.setWheelBrake(i, 0);
+        this.controller.setWheelSteering(i, 0);
+      }
+    }
+    this.syncVisual();
+  }
+
+  /** True when the car is resting on its roof or side. */
+  get isFlipped() {
+    const r = this.body.rotation();
+    this._q.set(r.x, r.y, r.z, r.w);
+    this._v.set(0, 1, 0).applyQuaternion(this._q);
+    return this._v.y < 0.25;
   }
 
   describe() {

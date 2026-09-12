@@ -151,13 +151,7 @@ export const VEHICLE_TUNING = {
   drivenAxle: 'all',
 };
 
-/** Rendering quality — mobile-friendly defaults. */
-export const QUALITY = {
-  maxPixelRatioDesktop: 2,
-  maxPixelRatioMobile: 1.5,
-  shadowMapSizeDesktop: 2048,
-  shadowMapSizeMobile: 1024,
-  shadowDistance: 18,
-  enableShadowsMobile: true,
-  postProcessing: false, // deliberately none
-};
+/**
+ * Rendering quality lives in src/settings.js (QUALITY_PRESETS), which is
+ * user-facing and persisted; this file stays vehicle tuning only.
+ */
