@@ -19,6 +19,8 @@ export const DEFAULTS = {
   shadows: true,
   reflections: true,
   headlightBeams: false, // real spot lights; off by default, they cost a shadow pass
+  sound: true,
+  volume: 0.7, // 0 – 1
   cameraSensitivity: 1.0, // 0.4 – 2.0
   steeringSensitivity: 1.0, // 0.5 – 1.6
   controlLayout: 'right', // right | left  (which thumb gets the pedals)

@@ -12,6 +12,7 @@ import { KinematicVehicle } from './vehicle/KinematicVehicle.js';
 import { NullPhysicsWorld } from './scene/NullPhysicsWorld.js';
 import { VehicleLights } from './vehicle/VehicleLights.js';
 import { Controls } from './input/Controls.js';
+import { EngineAudio } from './audio/EngineAudio.js';
 import { reportToConsole, buildReportJSON } from './model/reportToConsole.js';
 import { DebugPanel } from './ui/DebugPanel.js';
 import { Hud } from './ui/Hud.js';
@@ -87,6 +88,7 @@ const physics = rapierReady
   ? new VehiclePhysics(RAPIER, physicsWorld.world, visual)
   : new KinematicVehicle(visual);
 const lights = new VehicleLights(visual, { settings });
+const audio = new EngineAudio({ settings });
 const SPAWN = new Vector3(0, rapierReady ? 0.08 : 0, 0);
 physics.reset(SPAWN);
 
@@ -122,6 +124,7 @@ const controls = new Controls(container, {
   onCamera: () => rig.cycleMode(),
   onLights: () => lights.toggleHeadlights(),
   onIndicator: (dir) => lights.setIndicator(lights.state.indicator === dir ? 0 : dir),
+  onMute: () => settings.set('sound', !settings.get('sound')),
   onReverse: (on) => physics.requestReverse(on),
 });
 
@@ -178,6 +181,7 @@ renderer.setAnimationLoop(() => {
   const t = physics.telemetry;
 
   lights.update(dt, t);
+  audio.update(dt, t);
 
   // an upside-down car is a stuck car: offer the reset rather than forcing it
   flippedFor = physics.isFlipped && Math.abs(t.speedMps) < 1 ? flippedFor + dt : 0;
@@ -198,7 +202,7 @@ renderer.setAnimationLoop(() => {
 // -------------------------------------------------------------- debugging ---
 window.__BMW__ = {
   visual, physics, physicsWorld, environment, lights, controls, settings,
-  scene, camera, rig, hud, renderer, RAPIER, rapierReady,
+  scene, camera, rig, hud, renderer, RAPIER, rapierReady, audio,
   report: buildReportJSON(visual),
   dumpHierarchy: () => console.log(window.__BMW__.report.tree),
   drive: (throttle = 0, brake = 0, steer = 0, handbrake = false) => {

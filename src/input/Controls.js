@@ -3,7 +3,7 @@
  *
  *   W / ↑            throttle              S / ↓   brake (and reverse once stopped)
  *   A / ← , D / →    steer                 Space   handbrake
- *   R  reset   C  camera   L  lights   Z / X  indicators
+ *   R  reset   C  camera   L  lights   Z / X  indicators   M  mute
  *
  * The touch pad gives the same set: pedals, steering, handbrake, an explicit
  * reverse toggle, camera switch and reset.
@@ -13,13 +13,13 @@
  * pointerup plus `visibilitychange`/`blur` clears anything still held.
  */
 export class Controls {
-  constructor(container, { settings, onReset, onCamera, onLights, onIndicator, onReverse } = {}) {
+  constructor(container, { settings, onReset, onCamera, onLights, onIndicator, onReverse, onMute } = {}) {
     this.settings = settings;
     this.state = { throttle: 0, brake: 0, steer: 0, handbrake: false };
     this.keys = new Set();
     this.touch = { throttle: 0, brake: 0, steerLeft: 0, steerRight: 0, handbrake: false };
     this.reverseLatch = false;
-    this.callbacks = { onReset, onCamera, onLights, onIndicator, onReverse };
+    this.callbacks = { onReset, onCamera, onLights, onIndicator, onReverse, onMute };
     this.isTouch = matchMedia('(hover: none), (pointer: coarse)').matches || navigator.maxTouchPoints > 0;
 
     this.#bindKeyboard();
@@ -45,6 +45,7 @@ export class Controls {
         case 'KeyL': this.callbacks.onLights?.(); break;
         case 'KeyZ': this.callbacks.onIndicator?.(-1); break;
         case 'KeyX': this.callbacks.onIndicator?.(1); break;
+        case 'KeyM': this.callbacks.onMute?.(); break;
         default: break;
       }
     });

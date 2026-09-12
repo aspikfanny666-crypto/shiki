@@ -9,6 +9,7 @@ import { extractWheels } from '../model/extractWheels.js';
 import { measureForwardHint, normalizeModel } from '../model/normalizeModel.js';
 import { createPlaceholderVehicle } from '../model/PlaceholderVehicle.js';
 import { WheelVisualController, WHEEL_KEYS } from './WheelVisualController.js';
+import { detailTyres } from './TyreDetailing.js';
 
 /**
  * VehicleVisual — everything you can SEE. No colliders, no forces.
@@ -102,6 +103,8 @@ export class VehicleVisual {
       this.extraction = { ...report, ms: Math.round(performance.now() - t0) };
       extractedWheels = wheels;
       if (!wheels) this.warnings.push(`wheel extraction failed: ${report.warnings.join('; ')}`);
+      // the file has no textures at all, so the tyres get a generated tread
+      if (wheels) this.tyreDetail = detailTyres(wheels);
     }
 
     // 4. parts, by node name -> material name -> geometry, never invented

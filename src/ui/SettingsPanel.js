@@ -42,7 +42,7 @@ export class SettingsPanel {
         <button class="switch ${s.get(key) ? 'on' : ''}" data-toggle="${key}"><i></i></button>
       </div>`;
     const slider = (key, label, min, max, step) => `
-      <div class="row col"><span>${label} <b data-out="${key}">${Number(s.get(key)).toFixed(2)}×</b></span>
+      <div class="row col"><span>${label} <b data-out="${key}">${key === 'volume' ? `${Math.round(Number(s.get(key)) * 100)}%` : `${Number(s.get(key)).toFixed(2)}×`}</b></span>
         <input type="range" data-slider="${key}" min="${min}" max="${max}" step="${step}" value="${s.get(key)}">
       </div>`;
 
@@ -59,6 +59,10 @@ export class SettingsPanel {
       ${toggle('shadows', 'Shadows')}
       ${toggle('reflections', 'Reflections')}
       ${toggle('headlightBeams', 'Headlight beams')}
+
+      <h3>Sound</h3>
+      ${toggle('sound', 'Engine sound')}
+      ${slider('volume', 'Volume', 0, 1, 0.05)}
 
       <h3>Feel</h3>
       ${slider('cameraSensitivity', 'Camera follow', 0.4, 2, 0.05)}
@@ -85,7 +89,7 @@ export class SettingsPanel {
       </p>
       <p class="about dim">
         Keys: W/S or ↑/↓ drive · A/D or ←/→ steer · Space handbrake ·
-        C camera · R reset · L lights · Z/X indicators
+        C camera · R reset · L lights · Z/X indicators · M mute
       </p>`;
 
     this.el.addEventListener('click', (e) => {

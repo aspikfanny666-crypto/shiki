@@ -48,11 +48,19 @@ function geometryFromTriangles(geometry, triangles) {
   const out = new BufferGeometry();
   for (const [name, attr] of Object.entries(geometry.attributes)) {
     const size = attr.itemSize;
-    const array = new attr.array.constructor(remap.size * size);
+    // Read through the accessor API, never the raw array: this file stores
+    // several meshes in interleaved buffer views, where `attr.array` is the
+    // whole shared buffer and indexing it directly reads a neighbouring
+    // attribute's bytes — which produced huge stray polygons rotating with the
+    // wheels. getX/getY/getZ also de-normalise, so the copy is plain float32.
+    const array = new Float32Array(remap.size * size);
+    const readers = [attr.getX, attr.getY, attr.getZ, attr.getW];
     for (const [old, next] of remap) {
-      for (let c = 0; c < size; c++) array[next * size + c] = attr.array[old * size + c];
+      for (let c = 0; c < size; c++) {
+        array[next * size + c] = readers[c] ? readers[c].call(attr, old) : 0;
+      }
     }
-    out.setAttribute(name, new BufferAttribute(array, size, attr.normalized));
+    out.setAttribute(name, new BufferAttribute(array, size, false));
   }
   out.setIndex(new BufferAttribute(newIndex, 1));
   return out;
@@ -159,7 +167,6 @@ export function extractWheels(modelRoot, space, options = {}) {
     if (o.isMesh && o.geometry?.attributes?.position) meshes.push(o);
   });
 
-  const centroid = new Vector3();
   const world = new Vector3();
 
   for (const mesh of meshes) {
@@ -183,19 +190,31 @@ export function extractWheels(modelRoot, space, options = {}) {
     const rest = [];
 
     for (let t = 0; t < triCount; t++) {
-      triangleCentroid(pos, at(t * 3), at(t * 3 + 1), at(t * 3 + 2), centroid);
-      world.copy(centroid);
-      mesh.localToWorld(world);
-
+      // EVERY vertex has to be inside the wheel volume, not just the centroid.
+      // Testing the centroid alone lets a huge flat body panel whose centre
+      // happens to fall in a wheel well get pulled into the rotating wheel —
+      // which looks like black sheets sweeping around the car.
       let hit = null;
       for (const c of CORNERS) {
         const w = wheels[c];
-        if (Math.abs(world.x - w.center.x) > (w.width / 2) * opts.widthScale) continue;
-        const dy = world.y - w.center.y;
-        const dz = world.z - w.center.z;
-        if (dy * dy + dz * dz > (w.radius * opts.radiusScale) ** 2) continue;
-        hit = c;
-        break;
+        const halfWidth = (w.width / 2) * opts.widthScale;
+        const radiusSq = (w.radius * opts.radiusScale) ** 2;
+        let inside = true;
+        for (let k = 0; k < 3 && inside; k++) {
+          const i = at(t * 3 + k);
+          world.set(pos.getX(i), pos.getY(i), pos.getZ(i));
+          mesh.localToWorld(world);
+          if (Math.abs(world.x - w.center.x) > halfWidth) inside = false;
+          else {
+            const dy = world.y - w.center.y;
+            const dz = world.z - w.center.z;
+            if (dy * dy + dz * dz > radiusSq) inside = false;
+          }
+        }
+        if (inside) {
+          hit = c;
+          break;
+        }
       }
       if (hit) perCorner[hit].push(t);
       else rest.push(t);
