@@ -2,6 +2,7 @@ import { Clock, MathUtils, Vector3 } from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { MODEL_URL } from './config.js';
 import { settings } from './settings.js';
+import { VEHICLE_TUNING } from './vehicleConfig.js';
 import { createTestScene } from './scene/TestScene.js';
 import { PhysicsWorld } from './scene/PhysicsWorld.js';
 import { Environment } from './scene/Environment.js';
@@ -88,7 +89,7 @@ const physics = rapierReady
   ? new VehiclePhysics(RAPIER, physicsWorld.world, visual)
   : new KinematicVehicle(visual);
 const lights = new VehicleLights(visual, { settings });
-const audio = new EngineAudio({ settings });
+const audio = new EngineAudio({ settings, engine: VEHICLE_TUNING.engine });
 const SPAWN = new Vector3(0, rapierReady ? 0.08 : 0, 0);
 physics.reset(SPAWN);
 
@@ -121,7 +122,7 @@ const resetCar = () => {
 const controls = new Controls(container, {
   settings,
   onReset: resetCar,
-  onCamera: () => rig.cycleMode(),
+  onCamera: () => audio.setCamera(rig.cycleMode()),
   onLights: () => lights.toggleHeadlights(),
   onIndicator: (dir) => lights.setIndicator(lights.state.indicator === dir ? 0 : dir),
   onMute: () => settings.set('sound', !settings.get('sound')),
@@ -135,7 +136,7 @@ const settingsPanel = new SettingsPanel(container, settings, {
   },
 });
 
-debugPanel.addButton('Camera (C)', (b) => { b.textContent = `Camera: ${rig.cycleMode()}`; });
+debugPanel.addButton('Camera (C)', (b) => { b.textContent = `Camera: ${audio.setCamera(rig.cycleMode())}`; });
 debugPanel.addButton('Reset car (R)', resetCar);
 debugPanel.addButton('Bounds box', () => visual.showBoundsHelper(scene, !(visual.boxHelper?.visible ?? false)));
 debugPanel.addButton('World axes', () => { axes.visible = !axes.visible; });
