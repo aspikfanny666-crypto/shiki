@@ -103,6 +103,11 @@ console.groupEnd();
 
 // ------------------------------------------------------------------- UI ----
 const hud = new Hud(container);
+hud.bindSound(() => {
+  audio.setEnabled(true);
+  settings.set('sound', true);
+  audio.resume();
+});
 if (!rapierReady) hud.setNotice('simplified physics — WebAssembly blocked');
 const debugPanel = new DebugPanel(container);
 debugPanel.render(visual, physics);
@@ -131,6 +136,7 @@ const controls = new Controls(container, {
 
 const settingsPanel = new SettingsPanel(container, settings, {
   credit: visual.credit,
+  getAudioStatus: () => audio.diagnose(),
   onAction: (action) => {
     if (action === 'reset-car') resetCar();
   },
@@ -197,7 +203,12 @@ renderer.setAnimationLoop(() => {
   });
 
   renderer.render(scene, camera);
-  hud.update(t, { fps, camera: rig.mode, headlights: lights.state.headlights });
+  hud.update(t, {
+    fps,
+    camera: rig.mode,
+    headlights: lights.state.headlights,
+    soundBlocked: settings.get('sound') && !audio.running,
+  });
 });
 
 // -------------------------------------------------------------- debugging ---

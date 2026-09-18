@@ -7,9 +7,10 @@ import { DEFAULTS } from '../settings.js';
  * credit is always reachable from the UI.
  */
 export class SettingsPanel {
-  constructor(container, settings, { credit = null, onAction = () => {} } = {}) {
+  constructor(container, settings, { credit = null, onAction = () => {}, getAudioStatus = null } = {}) {
     this.settings = settings;
     this.onAction = onAction;
+    this.getAudioStatus = getAudioStatus;
 
     this.button = document.createElement('button');
     this.button.className = 'icon-btn settings-btn';
@@ -29,6 +30,16 @@ export class SettingsPanel {
   toggle(force) {
     this.el.hidden = force === undefined ? !this.el.hidden : !force;
     this.button.classList.toggle('active', !this.el.hidden);
+    if (!this.el.hidden) this.refreshStatus();
+  }
+
+  /** Live audio state, so "no sound" is diagnosable instead of mysterious. */
+  refreshStatus() {
+    const el = this.el.querySelector('[data-audio-status]');
+    if (!el || !this.getAudioStatus) return;
+    const s = this.getAudioStatus();
+    el.textContent = s.running ? `running · ${Math.round(s.sampleRate / 1000)} kHz` : s.built ? `${s.state} — tap the screen` : 'waiting for a tap';
+    el.className = s.running ? 'ok' : 'warn';
   }
 
   #render(credit) {
@@ -63,6 +74,9 @@ export class SettingsPanel {
       <h3>Sound</h3>
       ${toggle('sound', 'Engine sound')}
       ${slider('volume', 'Volume', 0, 1, 0.05)}
+      <div class="row"><span>Status</span><span data-audio-status class="dim">—</span></div>
+      <p class="about dim">No sound on a phone? Check the ringer switch — iPhones
+      mute web audio when it is set to silent. Tap the 🔊 button on the dial if it appears.</p>
 
       <h3>Feel</h3>
       ${slider('cameraSensitivity', 'Camera follow', 0.4, 2, 0.05)}

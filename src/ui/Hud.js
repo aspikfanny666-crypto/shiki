@@ -34,7 +34,8 @@ export class Hud {
         <span class="lamp" data-lamp-air>AIR</span>
       </div>
       <div class="hud-foot"><span data-cam>chase</span><span data-fps>60 fps</span></div>
-      <div class="hud-notice" data-notice hidden></div>`;
+      <div class="hud-notice" data-notice hidden></div>
+      <button class="hud-sound" data-sound hidden>🔊 TAP FOR SOUND</button>`;
     container.appendChild(this.el);
 
     const q = (sel) => this.el.querySelector(sel);
@@ -54,8 +55,27 @@ export class Hud {
       cam: q('[data-cam]'),
       fps: q('[data-fps]'),
       notice: q('[data-notice]'),
+      sound: q('[data-sound]'),
     };
     this._last = {};
+  }
+
+  /**
+   * Shows a tap target while the engine audio is switched on but the browser
+   * has not let it start — a tap on this button is a gesture the page is sure
+   * to see, which is what phones and embedded frames require.
+   */
+  bindSound(onTap) {
+    this.refs.sound.addEventListener('click', (e) => {
+      e.preventDefault();
+      onTap();
+    });
+  }
+
+  setSoundPrompt(visible) {
+    if (this._last.soundPrompt === visible) return;
+    this._last.soundPrompt = visible;
+    this.refs.sound.hidden = !visible;
   }
 
   /** One-line banner under the HUD (used when physics runs in fallback mode). */
@@ -81,7 +101,8 @@ export class Hud {
    * @param {object} t   VehiclePhysics telemetry
    * @param {object} ui  { fps, camera, headlights, redlineRpm }
    */
-  update(t, { fps = 60, camera = 'chase', headlights = false, redlineRpm = 7200 } = {}) {
+  update(t, { fps = 60, camera = 'chase', headlights = false, redlineRpm = 7200, soundBlocked = false } = {}) {
+    this.setSoundPrompt(soundBlocked);
     const speed = Math.abs(Math.round(t.speedKmh ?? 0));
     this.#text('speed', String(speed));
 

@@ -111,6 +111,25 @@ canvas { display: block; }
 }
 .hud-notice[hidden] { display: none; }
 
+.hud-sound {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 7px 6px;
+  font: 700 10px/1 ui-monospace, monospace;
+  letter-spacing: 0.08em;
+  color: #0b0e12;
+  background: var(--accent);
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  pointer-events: auto;
+  animation: soundpulse 1.8s ease-in-out infinite;
+}
+.hud-sound[hidden] { display: none; }
+@keyframes soundpulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+@media (prefers-reduced-motion: reduce) { .hud-sound { animation: none; } }
+
 .hud.flipped-hint::after {
   content: 'FLIPPED — press R / RESET';
   display: block; margin-top: 8px; padding: 4px 6px; text-align: center;

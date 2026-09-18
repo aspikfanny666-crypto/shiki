@@ -98,9 +98,34 @@ export class EngineAudio {
       if (key === 'volume' || key === '*') this.setVolume(settings.get('volume'));
     });
 
-    const unlock = () => this.resume();
-    window.addEventListener('pointerdown', unlock);
-    window.addEventListener('keydown', unlock);
+    // Unlock on anything that counts as a gesture, and keep listening until the
+    // context is genuinely running — one blocked attempt must not be the end of
+    // it. touchstart/touchend matter on older iOS, click inside an iframe on
+    // Safari.
+    this._unlock = () => {
+      if (this.running) return;
+      this.resume();
+    };
+    for (const type of ['pointerdown', 'pointerup', 'touchstart', 'touchend', 'click', 'keydown']) {
+      window.addEventListener(type, this._unlock, { passive: true });
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && this.enabled && this.started) this.resume();
+    });
+  }
+
+  /** What the audio is actually doing — shown in Settings and on the HUD. */
+  diagnose() {
+    return {
+      enabled: this.enabled,
+      volume: this.volume,
+      built: this.started,
+      state: this.ctx?.state ?? 'not created',
+      running: this.running,
+      keepAlive: this.keepAlive ? this.keepAlive.paused === false : false,
+      masterGain: this.master?.gain.value ?? null,
+      sampleRate: this.ctx?.sampleRate ?? null,
+    };
   }
 
   // ---------------------------------------------------------------- graph ---
@@ -284,8 +309,45 @@ export class EngineAudio {
     if (!this.started && !this.#build()) return false;
     // an OfflineAudioContext is 'suspended' until it renders, and resuming it
     // throws — only a live context gets resumed
-    if (!this.externalContext && this.ctx.state === 'suspended') this.ctx.resume();
+    if (!this.externalContext && this.ctx.state === 'suspended') {
+      this.ctx.resume().catch(() => {});
+    }
+    this.#startKeepAlive();
     return true;
+  }
+
+  /**
+   * An <audio> element fed by a (near-silent) branch of the graph.
+   *
+   * Two things need it. On iPhone the ringer switch mutes Web Audio unless a
+   * media element is playing, which is the usual reason a page is silent on a
+   * phone that is working fine otherwise. And in a cross-origin iframe, media
+   * playback started by a gesture is what some browsers accept as consent.
+   *
+   * It carries the engine at a whisper rather than pure digital silence, since
+   * a stream of zeroes can be treated as "not really playing".
+   */
+  #startKeepAlive() {
+    if (this.keepAlive || !this.ctx || this.externalContext) return;
+    try {
+      if (!this.ctx.createMediaStreamDestination) return;
+      const dest = this.ctx.createMediaStreamDestination();
+      const tap = this.ctx.createGain();
+      tap.gain.value = 0.0015;
+      this.master.connect(tap).connect(dest);
+
+      const el = document.createElement('audio');
+      el.srcObject = dest.stream;
+      el.playsInline = true;
+      el.setAttribute('playsinline', '');
+      el.loop = true;
+      el.volume = 1;
+      el.play().catch(() => {});
+      this.keepAlive = el;
+      this.keepAliveTap = tap;
+    } catch {
+      /* not fatal: the main output path is still ctx.destination */
+    }
   }
 
   get running() {
