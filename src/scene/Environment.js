@@ -16,10 +16,12 @@ import {
   Quaternion,
   Vector3,
 } from 'three';
+import { City } from './City.js';
 
 /**
  * The driving environment: a large asphalt pad with painted markings, kerbs,
- * grass, barriers, walls, cones, a few buildings and a ramp.
+ * barriers, walls, cones and a ramp, surrounded by a city (see City.js) that
+ * you can leave the pad and drive into.
  *
  * Draw-call budget matters more than polygon count here, so repeated objects
  * (kerb segments, cones, barriers, lamp posts) are InstancedMeshes and the road
@@ -164,7 +166,7 @@ export class Environment {
     this.#buildGround();
     this.#buildKerbs();
     this.#buildBarriers();
-    this.#buildBuildings();
+    this.#buildCity();
     this.#buildCones();
     this.#buildRamps();
   }
@@ -181,14 +183,15 @@ export class Environment {
   }
 
   #buildGround() {
-    // grass, far beyond the asphalt, doubles as the visual horizon
+    // ground beyond the city, far enough out to read as the horizon
     const grass = new Mesh(
       new PlaneGeometry(2000, 2000),
       new MeshStandardMaterial({ color: 0x3f4a33, roughness: 1, metalness: 0 }),
     );
     grass.name = 'Grass';
     grass.rotation.x = -Math.PI / 2;
-    grass.position.y = -0.02;
+    // under the city's street grid, which is itself under the circuit asphalt
+    grass.position.y = -0.06;
     grass.receiveShadow = true;
     this.root.add(grass);
 
@@ -299,24 +302,14 @@ export class Environment {
     this.root.add(posts);
   }
 
-  #buildBuildings() {
-    const mats = [
-      new MeshStandardMaterial({ color: 0x5a6472, roughness: 0.9 }),
-      new MeshStandardMaterial({ color: 0x6d6257, roughness: 0.92 }),
-      new MeshStandardMaterial({ color: 0x4c5a5e, roughness: 0.88 }),
-    ];
-    const blocks = [
-      { size: [22, 12, 18], position: [-70, 6, -70] },
-      { size: [16, 8, 16], position: [-72, 4, -30] },
-      { size: [28, 16, 20], position: [78, 8, 30] },
-      { size: [18, 6, 26], position: [64, 3, 78] },
-      { size: [12, 22, 12], position: [-95, 11, 40] },
-    ];
-    blocks.forEach((b, idx) => {
-      const mesh = this.#add(new Mesh(new BoxGeometry(...b.size), mats[idx % mats.length]));
-      mesh.position.set(...b.position);
-      mesh.name = 'Building';
-      this.physicsWorld.addStaticBox({ size: b.size, position: b.position, visible: false });
+  /**
+   * The city. Every building hands back a primitive cuboid for collision — the
+   * meshes themselves are never used as colliders.
+   */
+  #buildCity() {
+    this.city = new City(this.root, {
+      quality: this.quality,
+      addCollider: ({ size, position }) => this.physicsWorld.addStaticBox({ size, position, visible: false }),
     });
   }
 
@@ -410,13 +403,20 @@ export class Environment {
     const aniso = quality === 'low' ? 1 : quality === 'medium' ? 4 : 8;
     if (this.asphalt.material.map) this.asphalt.material.map.anisotropy = aniso;
     if (this.markings.material.map) this.markings.material.map.anisotropy = aniso;
+    this.city?.setQuality(quality);
   }
 
   setShadows(enabled) {
     this.root.traverse((o) => {
-      if (!o.isMesh) return;
+      if (!o.isMesh || o.name.startsWith('City')) return;
       if (o.name === 'Grass' || o.name === 'Asphalt') o.receiveShadow = enabled;
       else o.castShadow = enabled && o.name !== 'RoadMarkings';
     });
+    this.city?.setShadows(enabled);
+  }
+
+  /** Windows and street lamps come up as the car's own lights go on. */
+  setNightLevel(level) {
+    this.city?.setNightLevel(level);
   }
 }

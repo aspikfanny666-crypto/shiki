@@ -22,8 +22,11 @@ const MODES = ['chase', 'close', 'hood', 'cockpit', 'free'];
 const RIGS = {
   chase: { offset: new Vector3(0, 2.25, 6.6), look: new Vector3(0, 1.0, -4.5), fov: 55, stiff: 5.5, speedPull: 2.4, sway: 0.85 },
   close: { offset: new Vector3(0, 1.55, 4.3), look: new Vector3(0, 0.95, -5.5), fov: 62, stiff: 8.0, speedPull: 1.5, sway: 0.55 },
-  hood: { offset: new Vector3(0, 1.22, -1.05), look: new Vector3(0, 1.0, -14), fov: 66, stiff: 24, speedPull: 0, sway: 0.18 },
-  cockpit: { offset: new Vector3(-0.39, 1.12, 0.22), look: new Vector3(-0.38, 0.98, -14), fov: 70, stiff: 30, speedPull: 0, sway: 0.12 },
+  // The interior views are RIGID: they are bolted to the car like a seat or a
+  // bonnet mount. Any sway or speed pull there reads as the camera sliding
+  // backwards out of the cabin while you accelerate, which is what it did.
+  hood: { offset: new Vector3(0, 1.22, -1.05), look: new Vector3(0, 1.0, -14), fov: 66, stiff: 24, speedPull: 0, sway: 0, rigid: true },
+  cockpit: { offset: new Vector3(-0.39, 1.12, 0.18), look: new Vector3(-0.38, 0.98, -14), fov: 70, stiff: 30, speedPull: 0, sway: 0, rigid: true },
 };
 
 export class CameraRig {
@@ -90,6 +93,23 @@ export class CameraRig {
     const rig = RIGS[this.mode];
     const sensitivity = this.settings?.get('cameraSensitivity') ?? 1;
     const smoothing = 1 - Math.exp(-rig.stiff * sensitivity * dt);
+
+    // --- interior views: fixed to the car, no lag and no inertia -------------
+    if (rig.rigid) {
+      this._desired.copy(rig.offset).applyQuaternion(target.quaternion).add(target.position);
+      this._look.copy(rig.look).applyQuaternion(target.quaternion).add(target.position);
+      this.camera.position.copy(this._desired);
+      this.controls.target.copy(this._look);
+      this.camera.lookAt(this.controls.target);
+      if (Math.abs(this.camera.fov - rig.fov) > 0.05) {
+        this.camera.fov = rig.fov;
+        this.camera.updateProjectionMatrix();
+      }
+      this._speed01 = 0;
+      this._accelSway = 0;
+      this._lastSpeed = speedKmh;
+      return;
+    }
 
     // speed factor drives the pull-back and the FOV stretch
     const speed01 = MathUtils.clamp(Math.abs(speedKmh) / 240, 0, 1);

@@ -17,17 +17,31 @@ glTF model. `npm run dev`, then open http://localhost:5173.
 | `Space` | handbrake (locks the rear axle) |
 | `R` | reset the car |
 | `C` | camera: chase → close → hood → cockpit → free |
-| `L` | headlights |
+| `L` | headlights (also brings up the city's windows and street lamps) |
 | `Z` / `X` | left / right indicator |
 
-On touch devices an on-screen pad appears automatically: steering arrows, GAS
-and BRAKE pedals, handbrake, a latching **R** for reverse (with the pedals
-swapped so GAS drives backwards), plus camera, lights and reset. The pedals can
-be moved to the left thumb in Settings → Controls.
+On touch devices an on-screen pad appears automatically:
 
-Buttons cannot stick: each one captures its pointer and releases on
-`pointerup`, `pointercancel` and `lostpointercapture`, and a global
-`pointerup` plus tab-blur clears anything still held.
+* a **steering wheel** you turn with a finger. The angle is measured around the
+  wheel's own centre and accumulated, so you can keep turning past where you
+  grabbed it; it is limited to ±135° on screen and springs back to centre at a
+  rate fixed in seconds, not frames, so it feels the same at 30 and 120 fps.
+  Screen-clockwise is a right turn.
+* **pedals** rather than buttons. They ramp in — 170 ms to full throttle,
+  110 ms to full brake — so a tap is a blip and a hold is full travel, and the
+  fill inside each pedal shows how far in it is.
+* a latching **R** for reverse (with the pedals swapped so GAS drives
+  backwards), handbrake **P**, plus CAM, RESET, LIGHT and SND.
+
+Settings → Controls switches the wheel back to the old left/right arrows
+(**Touch steering: Wheel | Arrows**) and moves the pedals to the left thumb
+(**Touch layout**).
+
+Buttons cannot stick, and holding two at once works: every press is tracked by
+`pointerId`, so a release clears only the finger that ended — pressing the
+wheel never drops the throttle. Losing window focus clears the keyboard only,
+because an embedded page can lose focus to its host while a finger is still on
+a pedal.
 
 ## Camera
 
@@ -51,8 +65,9 @@ the road, and pull back further on a portrait phone screen.
 
 The ⚙ panel (persisted in `localStorage`): graphics quality (low / medium /
 high), shadows, reflections, headlight beams, camera follow sensitivity,
-steering sensitivity, touch layout (pedals left or right), debug panel, plus
-reset-car, restore-defaults and the model attribution.
+steering sensitivity, touch layout (pedals left or right), touch steering
+(wheel or arrows), debug panel, plus install-as-an-app, reset-car,
+restore-defaults and the model attribution.
 
 ## Measured behaviour
 
@@ -152,20 +167,80 @@ here and were each found by measurement:
 
 A 240 m asphalt pad with painted markings (dashed lanes, a start box, a skid
 pad, braking markers) baked into a single canvas texture, red/white kerbs and
-barrier posts as instanced meshes, Armco runs, concrete walls, five buildings,
-two ramps, two speed bumps and twenty knock-over cones — the cones are one
-InstancedMesh driven by twenty dynamic cylinder bodies. Collision geometry is
-cuboids and cylinders only.
+barrier posts as instanced meshes, Armco runs, concrete walls, two ramps, two
+speed bumps and twenty knock-over cones — the cones are one InstancedMesh
+driven by twenty dynamic cylinder bodies. Collision geometry is cuboids and
+cylinders only.
+
+### The city (`src/scene/City.js`)
+
+The pad is open on three sides and the streets around it are drivable. The city
+is generated from a seeded PRNG, so it is identical on every load and the
+collision boxes always match what is drawn:
+
+* **Facades** are painted canvases: window bays, recessed reveals, mullions,
+  floor slabs, dark glass with a sky gradient, and a share of rooms lit from
+  inside (some with a half-drawn blind). A second canvas holds *only* the lit
+  windows and is used as the emissive map, so a window glows without the
+  concrete glowing with it. `L` (headlights) raises that emissive level and the
+  street lamps with it.
+* **Buildings** come in five size classes — low block, mid block, slab, tower,
+  glass tower — and each class is one `InstancedMesh`, so ~135 buildings are
+  about ten draw calls. Per-instance colour gives each one its own shade, and
+  the height is scaled by whole storeys so the windows stay square. Each gets a
+  parapet and a roof plant room, because a perfectly sharp lid is what makes a
+  box city look like boxes.
+* **Streets** are one tiling ground texture whose tile is exactly one 64 m
+  block: carriageway, kerb line, dashed centre line, pavement and the yard
+  behind it. Because the tile *is* the block, the road grid lines up with the
+  buildings for free.
+* **Collision**: every building hands back a primitive cuboid. As everywhere
+  else in this project, no mesh is ever used as a collider.
+
+Side-face UVs are squeezed by `depth / width` so a window is the same size on
+the narrow side of a building as on the wide one.
+
+## Install it on a phone
+
+The build is a PWA, so it can live on a home screen and run with no network at
+all.
+
+* **Android / desktop Chrome, Edge**: Settings → Install → **Install app**
+  (the button only appears when the browser offers `beforeinstallprompt`).
+* **iPhone / iPad**: Safari only — **Share → Add to Home Screen → Add**. iOS
+  has no install event, so Settings → Install shows those steps instead of a
+  button that could not work. Chrome and Firefox on iOS cannot add web apps to
+  the home screen.
+
+`public/sw.js` is the service worker. It pre-caches from `dist/sw-manifest.json`
+(written by `scripts/build-sw-manifest.mjs` after every build — about 13 MB,
+the 7.5 MB car model included) because the worker only starts controlling the
+page *after* it activates, by which time the model has already been fetched;
+runtime caching alone would leave a first visitor with an app that opens offline
+and then cannot load the car. Navigations are network-first so a redeploy is
+picked up while online; everything else is cache-first, which is exactly right
+for content-hashed file names. The cache id is stamped with the main bundle's
+hash at build time, so a new deploy drops the old cache.
+
+Nothing of this runs in an embedded frame (a published artifact, an `<iframe>`
+preview): a service worker registered from a sandboxed frame is useless, and an
+app cannot be installed from inside someone else's page. Settings → Install
+says so rather than offering a dead button.
+
+`.github/workflows/simulator-pages.yml` builds and deploys `dist/` to GitHub
+Pages on every push to `main` that touches the simulator. One-time repository
+setup: **Settings → Pages → Source: GitHub Actions**.
 
 ## Performance
 
 | | |
 |---|---|
-| draw calls | ~194 at medium (car 151 meshes + environment + shadow pass) |
-| triangles per frame | ~320k at medium, ~548k at high (car is 306k) |
+| draw calls | ~218 at medium (car 151 meshes + city + environment + shadow pass) |
+| triangles per frame | ~350k at medium (car is 306k; the whole city adds ~30k) |
 | shadows | one blob contact shadow always; the sun shadow casts from a **box proxy** at low/medium (12 triangles) and from the 47 large panels at high |
 | pixel ratio | capped at 1.0 / 1.5 / 2.0 by quality preset |
-| textures | none in the model; the asphalt and markings are two generated canvases |
+| textures | none in the model; asphalt, markings, streets and every facade are generated canvases |
+| city density | 55 % of plots at low quality, 80 % at medium, 100 % at high; street lamps are dropped at low |
 | physics | fixed 60 Hz step with an accumulator, max 5 substeps per frame |
 | post-processing | none |
 

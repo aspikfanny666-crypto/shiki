@@ -138,6 +138,8 @@ dist
 # simulator sources are real project files and must be tracked.
 !src/**/*.js
 !vite.config.js
+# the service worker is a source file, not a build artefact
+!public/sw.js
 dist/
 .vite/
 # The BMW M5 CS (F90) model is CC BY 4.0 (author: fvrenbld), so it is kept in

@@ -7,10 +7,11 @@ import { DEFAULTS } from '../settings.js';
  * credit is always reachable from the UI.
  */
 export class SettingsPanel {
-  constructor(container, settings, { credit = null, onAction = () => {}, getAudioStatus = null } = {}) {
+  constructor(container, settings, { credit = null, onAction = () => {}, getAudioStatus = null, install = null } = {}) {
     this.settings = settings;
     this.onAction = onAction;
     this.getAudioStatus = getAudioStatus;
+    this.install = install;
 
     this.button = document.createElement('button');
     this.button.className = 'icon-btn settings-btn';
@@ -25,12 +26,48 @@ export class SettingsPanel {
 
     this.button.addEventListener('click', () => this.toggle());
     this.#render(credit);
+    install?.subscribe(() => this.refreshInstall());
   }
 
   toggle(force) {
     this.el.hidden = force === undefined ? !this.el.hidden : !force;
     this.button.classList.toggle('active', !this.el.hidden);
-    if (!this.el.hidden) this.refreshStatus();
+    if (!this.el.hidden) {
+      this.refreshStatus();
+      this.refreshInstall();
+    }
+  }
+
+  /**
+   * What "install" means depends on the browser, so the row says what this one
+   * actually offers instead of showing a button that may do nothing.
+   */
+  refreshInstall() {
+    const row = this.el.querySelector('[data-install]');
+    if (!row) return;
+    row.innerHTML = this.#installHtml();
+  }
+
+  #installHtml() {
+    switch (this.install?.status) {
+      case 'installed':
+        return '<p class="about ok">Running as an installed app — it works offline, '
+          + 'and the car model is already stored on the device.</p>';
+      case 'prompt':
+        return '<p class="about">Add the simulator to your home screen; it then opens '
+          + 'full-screen and runs without a network.</p>'
+          + '<div class="row actions"><button data-action="install">Install app</button></div>';
+      case 'ios':
+        return '<p class="about">iOS installs web apps from the Share menu, not from a button:<br>'
+          + '<b>1.</b> tap <b>Share</b> (the square with the arrow) in the Safari toolbar<br>'
+          + '<b>2.</b> scroll down and tap <b>Add to Home Screen</b><br>'
+          + '<b>3.</b> tap <b>Add</b> — an M5 icon appears on the home screen.</p>'
+          + '<p class="about dim">It has to be Safari: Chrome and Firefox on iOS cannot add web '
+          + 'apps to the home screen. Once added it opens full-screen and plays offline.</p>';
+      default:
+        return '<p class="about dim">Open this page in its own browser tab (not embedded in '
+          + 'another page) to install it as an app that runs offline.</p>';
+    }
   }
 
   /** Live audio state, so "no sound" is diagnosable instead of mysterious. */
@@ -70,6 +107,9 @@ export class SettingsPanel {
         <button class="icon-btn close" data-close>✕</button>
       </header>
 
+      <h3>Install</h3>
+      <div data-install>${this.#installHtml()}</div>
+
       <h3>Graphics</h3>
       <div class="row col"><span>Quality</span>
         ${seg('quality', [{ value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High' }])}
@@ -93,6 +133,9 @@ export class SettingsPanel {
       <h3>Controls</h3>
       <div class="row col"><span>Touch layout</span>
         ${seg('controlLayout', [{ value: 'right', label: 'Pedals right' }, { value: 'left', label: 'Pedals left' }])}
+      </div>
+      <div class="row col"><span>Touch steering</span>
+        ${seg('touchSteering', [{ value: 'wheel', label: 'Wheel' }, { value: 'arrows', label: 'Arrows' }])}
       </div>
       ${toggle('debug', 'Debug panel')}
 
@@ -137,7 +180,9 @@ export class SettingsPanel {
 
       const action = e.target.closest('[data-action]');
       if (action) {
-        if (action.dataset.action === 'defaults') {
+        if (action.dataset.action === 'install') {
+          this.install?.install().then(() => this.refreshInstall());
+        } else if (action.dataset.action === 'defaults') {
           this.settings.reset();
           this.#render(credit);
         } else {

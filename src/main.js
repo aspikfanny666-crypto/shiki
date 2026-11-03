@@ -18,6 +18,7 @@ import { reportToConsole, buildReportJSON } from './model/reportToConsole.js';
 import { DebugPanel } from './ui/DebugPanel.js';
 import { Hud } from './ui/Hud.js';
 import { SettingsPanel } from './ui/SettingsPanel.js';
+import { registerServiceWorker, InstallManager } from './pwa.js';
 import './ui/style.css';
 
 const container = document.getElementById('app');
@@ -162,8 +163,14 @@ const controls = new Controls(container, {
   onReverse: (on) => physics.requestReverse(on),
 });
 
+// Offline support + the "add to home screen" affordance. Registration is a
+// no-op in dev and inside an embedded frame; see src/pwa.js.
+const install = new InstallManager();
+registerServiceWorker();
+
 const settingsPanel = new SettingsPanel(container, settings, {
   credit: visual.credit,
+  install,
   getAudioStatus: () => audio.diagnose(),
   onAction: (action) => {
     if (action === 'reset-car') resetCar();
@@ -218,6 +225,8 @@ renderer.setAnimationLoop(() => {
 
   lights.update(dt, t);
   audio.update(dt, t);
+  // the city answers the headlight switch: windows and street lamps come up
+  environment.setNightLevel(lights.state.headlights ? 1 : 0);
 
   // an upside-down car is a stuck car: offer the reset rather than forcing it
   flippedFor = physics.isFlipped && Math.abs(t.speedMps) < 1 ? flippedFor + dt : 0;
@@ -252,8 +261,11 @@ window.__BMW__ = {
   report: buildReportJSON(visual),
   dumpHierarchy: () => console.log(window.__BMW__.report.tree),
   drive: (throttle = 0, brake = 0, steer = 0, handbrake = false) => {
-    controls.touch.throttle = throttle;
-    controls.touch.brake = brake;
+    // The touch pedals ramp in from the moment they are pressed, so a scripted
+    // "full throttle" backdates the press rather than setting a level.
+    const long = performance.now() - 5000;
+    controls.touch.throttleAt = throttle > 0 ? long : 0;
+    controls.touch.brakeAt = brake > 0 ? long : 0;
     controls.touch.steerLeft = steer > 0 ? steer : 0;
     controls.touch.steerRight = steer < 0 ? -steer : 0;
     controls.touch.handbrake = handbrake;

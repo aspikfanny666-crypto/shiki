@@ -24,6 +24,7 @@ export const DEFAULTS = {
   cameraSensitivity: 1.0, // 0.4 – 2.0
   steeringSensitivity: 1.0, // 0.5 – 1.6
   controlLayout: 'right', // right | left  (which thumb gets the pedals)
+  touchSteering: 'wheel', // wheel | arrows
   debug: false,
 };
 

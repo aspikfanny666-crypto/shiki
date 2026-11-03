@@ -1,4 +1,5 @@
-import { Box3, BufferAttribute, BufferGeometry, Group, Mesh, Vector3 } from 'three';
+import { Box3, BufferGeometry, Group, Mesh, Vector3 } from 'three';
+import { geometryFromTriangles } from './geometrySplit.js';
 import { MATERIAL_PATTERNS, WHEEL_EXTRACTION } from '../vehicleConfig.js';
 
 /**
@@ -22,47 +23,6 @@ function triangleCentroid(pos, ia, ib, ic, out) {
     (pos.getY(ia) + pos.getY(ib) + pos.getY(ic)) / 3,
     (pos.getZ(ia) + pos.getZ(ib) + pos.getZ(ic)) / 3,
   );
-  return out;
-}
-
-/** Builds a new indexed geometry containing only the listed triangles. */
-function geometryFromTriangles(geometry, triangles) {
-  const index = geometry.index;
-  const at = index ? (i) => index.getX(i) : (i) => i;
-  const remap = new Map();
-  const newIndex = new Uint32Array(triangles.length * 3);
-  let w = 0;
-
-  for (const t of triangles) {
-    for (let k = 0; k < 3; k++) {
-      const old = at(t * 3 + k);
-      let next = remap.get(old);
-      if (next === undefined) {
-        next = remap.size;
-        remap.set(old, next);
-      }
-      newIndex[w++] = next;
-    }
-  }
-
-  const out = new BufferGeometry();
-  for (const [name, attr] of Object.entries(geometry.attributes)) {
-    const size = attr.itemSize;
-    // Read through the accessor API, never the raw array: this file stores
-    // several meshes in interleaved buffer views, where `attr.array` is the
-    // whole shared buffer and indexing it directly reads a neighbouring
-    // attribute's bytes — which produced huge stray polygons rotating with the
-    // wheels. getX/getY/getZ also de-normalise, so the copy is plain float32.
-    const array = new Float32Array(remap.size * size);
-    const readers = [attr.getX, attr.getY, attr.getZ, attr.getW];
-    for (const [old, next] of remap) {
-      for (let c = 0; c < size; c++) {
-        array[next * size + c] = readers[c] ? readers[c].call(attr, old) : 0;
-      }
-    }
-    out.setAttribute(name, new BufferAttribute(array, size, false));
-  }
-  out.setIndex(new BufferAttribute(newIndex, 1));
   return out;
 }
 
