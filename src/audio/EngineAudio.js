@@ -114,9 +114,28 @@ export class EngineAudio {
     });
   }
 
+  /**
+   * Whether the document is even allowed to play audio. An artifact runs inside
+   * the host's iframe, and if that frame was created without the autoplay
+   * permission, no gesture will start a context — worth knowing before blaming
+   * the code.
+   * @returns {boolean|null} null when the browser does not expose it
+   */
+  static autoplayAllowed() {
+    try {
+      const fp = document.featurePolicy ?? document.permissionsPolicy;
+      if (fp?.allowsFeature) return fp.allowsFeature('autoplay');
+    } catch {
+      /* not exposed */
+    }
+    return null;
+  }
+
   /** What the audio is actually doing — shown in Settings and on the HUD. */
   diagnose() {
     return {
+      autoplayAllowed: EngineAudio.autoplayAllowed(),
+      embedded: window.top !== window.self,
       enabled: this.enabled,
       volume: this.volume,
       built: this.started,
@@ -329,6 +348,11 @@ export class EngineAudio {
    */
   #startKeepAlive() {
     if (this.keepAlive || !this.ctx || this.externalContext) return;
+    // Only iOS needs this, and only iOS benefits: elsewhere routing a
+    // MediaStream through an element can send audio to the wrong output.
+    const ua = navigator.userAgent || '';
+    const isIOS = /iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+    if (!isIOS) return;
     try {
       if (!this.ctx.createMediaStreamDestination) return;
       const dest = this.ctx.createMediaStreamDestination();

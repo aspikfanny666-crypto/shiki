@@ -103,10 +103,31 @@ console.groupEnd();
 
 // ------------------------------------------------------------------- UI ----
 const hud = new Hud(container);
+
+/**
+ * An artifact runs inside the host's iframe. If that frame was created without
+ * the `autoplay` permission the browser mutes the page no matter how many times
+ * it is tapped — the audio graph runs and produces samples that never reach the
+ * speakers. The page cannot grant itself the permission, but opening the same
+ * URL as a top-level tab escapes the frame entirely, so that is what the badge
+ * offers when the policy is the thing in the way.
+ */
+const audioPolicyBlocked = EngineAudio.autoplayAllowed() === false;
+if (audioPolicyBlocked) {
+  console.warn(
+    'This page is embedded in a frame without the autoplay permission, so the browser will not let it make sound. ' +
+      'Open the page in its own tab for audio.',
+  );
+}
+
 hud.bindSound(() => {
-  audio.setEnabled(true);
   settings.set('sound', true);
   audio.resume();
+  if (!audioPolicyBlocked) return;
+  const opened = window.open(window.location.href, '_blank', 'noopener');
+  if (!opened) {
+    hud.setNotice('sound is blocked here — open this page in its own tab');
+  }
 });
 if (!rapierReady) hud.setNotice('simplified physics — WebAssembly blocked');
 const debugPanel = new DebugPanel(container);
@@ -131,6 +152,13 @@ const controls = new Controls(container, {
   onLights: () => lights.toggleHeadlights(),
   onIndicator: (dir) => lights.setIndicator(lights.state.indicator === dir ? 0 : dir),
   onMute: () => settings.set('sound', !settings.get('sound')),
+  // A tap on a real button is the gesture browsers want before audio may start,
+  // so this both enables and unlocks it.
+  onSound: () => {
+    const next = !(settings.get('sound') && audio.running);
+    settings.set('sound', next);
+    if (next) audio.resume();
+  },
   onReverse: (on) => physics.requestReverse(on),
 });
 
@@ -170,6 +198,7 @@ visual.setShadows(settings.get('shadows'), settings.get('quality'));
 const clock = new Clock();
 let fps = 60;
 let flippedFor = 0;
+const stepPhysics = (step) => physics.update(step);
 
 loader?.classList.add('done');
 setTimeout(() => loader?.remove(), 600);
@@ -181,7 +210,7 @@ renderer.setAnimationLoop(() => {
 
   const input = controls.sample();
   physics.setInput(input);
-  physicsWorld.step(dt, (step) => physics.update(step));
+  physicsWorld.step(dt, stepPhysics);
   physics.syncVisual();
   environment.update();
 
@@ -203,11 +232,16 @@ renderer.setAnimationLoop(() => {
   });
 
   renderer.render(scene, camera);
+  const wantSound = settings.get('sound');
+  const soundOn = wantSound && audio.running && !audioPolicyBlocked;
+  controls.setSoundState(soundOn);
   hud.update(t, {
     fps,
     camera: rig.mode,
     headlights: lights.state.headlights,
-    soundBlocked: settings.get('sound') && !audio.running,
+    soundBlocked: wantSound && !soundOn,
+    soundLabel: audioPolicyBlocked ? '🔊 OPEN IN A TAB FOR SOUND' : '🔊 TAP FOR SOUND',
+    audioState: !wantSound ? 'off' : audioPolicyBlocked ? 'blocked by host' : audio.running ? 'on' : audio.started ? 'blocked' : 'tap',
   });
 });
 

@@ -33,7 +33,7 @@ export class Hud {
         <span class="lamp" data-lamp-lights>LIGHTS</span>
         <span class="lamp" data-lamp-air>AIR</span>
       </div>
-      <div class="hud-foot"><span data-cam>chase</span><span data-fps>60 fps</span></div>
+      <div class="hud-foot"><span data-cam>chase</span><span data-audio>snd —</span><span data-fps>60 fps</span></div>
       <div class="hud-notice" data-notice hidden></div>
       <button class="hud-sound" data-sound hidden>🔊 TAP FOR SOUND</button>`;
     container.appendChild(this.el);
@@ -53,6 +53,7 @@ export class Hud {
       lights: q('[data-lamp-lights]'),
       air: q('[data-lamp-air]'),
       cam: q('[data-cam]'),
+      audio: q('[data-audio]'),
       fps: q('[data-fps]'),
       notice: q('[data-notice]'),
       sound: q('[data-sound]'),
@@ -72,10 +73,15 @@ export class Hud {
     });
   }
 
-  setSoundPrompt(visible) {
-    if (this._last.soundPrompt === visible) return;
-    this._last.soundPrompt = visible;
-    this.refs.sound.hidden = !visible;
+  setSoundPrompt(visible, label = '🔊 TAP FOR SOUND') {
+    if (this._last.soundPrompt !== visible) {
+      this._last.soundPrompt = visible;
+      this.refs.sound.hidden = !visible;
+    }
+    if (this._last.soundLabel !== label) {
+      this._last.soundLabel = label;
+      this.refs.sound.textContent = label;
+    }
   }
 
   /** One-line banner under the HUD (used when physics runs in fallback mode). */
@@ -101,8 +107,9 @@ export class Hud {
    * @param {object} t   VehiclePhysics telemetry
    * @param {object} ui  { fps, camera, headlights, redlineRpm }
    */
-  update(t, { fps = 60, camera = 'chase', headlights = false, redlineRpm = 7200, soundBlocked = false } = {}) {
-    this.setSoundPrompt(soundBlocked);
+  update(t, { fps = 60, camera = 'chase', headlights = false, redlineRpm = 7200, soundBlocked = false, soundLabel, audioState = 'off' } = {}) {
+    this.setSoundPrompt(soundBlocked, soundLabel);
+    this.#text('audio', `snd ${audioState}`);
     const speed = Math.abs(Math.round(t.speedKmh ?? 0));
     this.#text('speed', String(speed));
 

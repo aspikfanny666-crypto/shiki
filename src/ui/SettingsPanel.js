@@ -38,8 +38,15 @@ export class SettingsPanel {
     const el = this.el.querySelector('[data-audio-status]');
     if (!el || !this.getAudioStatus) return;
     const s = this.getAudioStatus();
-    el.textContent = s.running ? `running · ${Math.round(s.sampleRate / 1000)} kHz` : s.built ? `${s.state} — tap the screen` : 'waiting for a tap';
-    el.className = s.running ? 'ok' : 'warn';
+    const blockedByHost = s.autoplayAllowed === false;
+    el.textContent = blockedByHost
+      ? 'blocked by this page\u2019s frame'
+      : s.running
+        ? `running · ${Math.round(s.sampleRate / 1000)} kHz`
+        : s.built
+          ? `${s.state} — tap the screen`
+          : 'waiting for a tap';
+    el.className = s.running && !blockedByHost ? 'ok' : 'warn';
   }
 
   #render(credit) {
@@ -75,8 +82,9 @@ export class SettingsPanel {
       ${toggle('sound', 'Engine sound')}
       ${slider('volume', 'Volume', 0, 1, 0.05)}
       <div class="row"><span>Status</span><span data-audio-status class="dim">—</span></div>
-      <p class="about dim">No sound on a phone? Check the ringer switch — iPhones
-      mute web audio when it is set to silent. Tap the 🔊 button on the dial if it appears.</p>
+      <p class="about dim">No sound? If the status says <b>blocked by this page\u2019s frame</b>,
+      the page is embedded somewhere that forbids audio — open it in its own tab and it will play.
+      On a phone also check the ringer switch: iPhones mute web audio when it is set to silent.</p>
 
       <h3>Feel</h3>
       ${slider('cameraSensitivity', 'Camera follow', 0.4, 2, 0.05)}

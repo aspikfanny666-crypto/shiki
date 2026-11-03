@@ -385,16 +385,20 @@ export class Environment {
 
   /** Dynamic props follow their bodies (instanced ones write their matrix). */
   update() {
-    const m = new Matrix4();
-    const q = new Quaternion();
-    const v = new Vector3();
+    // scratch objects live on the instance: this runs every frame
+    const m = this._m ??= new Matrix4();
+    const q = this._q ??= new Quaternion();
+    const v = this._v ??= new Vector3();
+    const pos = this._pos ??= new Vector3();
+    const one = this._one ??= new Vector3(1, 1, 1);
     let dirty = false;
     for (const item of this.dynamic) {
       const t = item.body.translation();
       const r = item.body.rotation();
       q.set(r.x, r.y, r.z, r.w);
       v.set(0, item.yOffset ?? 0, 0).applyQuaternion(q);
-      m.compose(new Vector3(t.x + v.x, t.y + v.y, t.z + v.z), q, new Vector3(1, 1, 1));
+      pos.set(t.x + v.x, t.y + v.y, t.z + v.z);
+      m.compose(pos, q, one);
       item.instanced.setMatrixAt(item.instanceId, m);
       dirty = true;
     }

@@ -153,24 +153,15 @@ export class KinematicVehicle {
     root.quaternion.setFromEuler(this._euler.set(0, this.heading, 0));
     this.visual.setSteeringWheelAngle?.(this.steering);
 
-    const ackermann = this.#ackermann();
-    for (const [key, wheel] of Object.entries(this.visual.wheels)) {
-      if (!wheel) continue;
-      wheel.spin.rotation.x = -this.wheelSpin;
-      if (key.startsWith('front')) wheel.pivot.rotation.y = ackermann[key];
-    }
-  }
-
-  #ackermann() {
-    const wheelbase = this.visual.wheelbase ?? 2.98;
-    const track = this.visual.trackFront ?? 1.63;
-    const d = this.steering;
-    if (Math.abs(d) < 1e-4) return { frontLeft: 0, frontRight: 0 };
-    const radius = wheelbase / Math.tan(Math.abs(d));
-    const inner = Math.atan(wheelbase / (radius - track / 2));
-    const outer = Math.atan(wheelbase / (radius + track / 2));
-    const sign = Math.sign(d);
-    return sign > 0 ? { frontLeft: inner * sign, frontRight: outer * sign } : { frontLeft: outer * sign, frontRight: inner * sign };
+    // WheelVisualController already does Ackermann from the measured track and
+    // wheelbase, and rolls each wheel on its own radius — no reason to repeat it
+    const wheels = this.visual.wheelController;
+    if (!wheels) return;
+    wheels.setSteeringAngle(this.steering);
+    wheels.setWheelRotations({
+      frontLeft: this.wheelSpin, frontRight: this.wheelSpin,
+      rearLeft: this.wheelSpin, rearRight: this.wheelSpin,
+    });
   }
 
   reset(position = new Vector3(0, 0, 0), heading = 0) {

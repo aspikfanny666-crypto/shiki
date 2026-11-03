@@ -13,13 +13,15 @@
  * pointerup plus `visibilitychange`/`blur` clears anything still held.
  */
 export class Controls {
-  constructor(container, { settings, onReset, onCamera, onLights, onIndicator, onReverse, onMute } = {}) {
+  constructor(container, { settings, onReset, onCamera, onLights, onIndicator, onReverse, onMute, onSound } = {}) {
     this.settings = settings;
     this.state = { throttle: 0, brake: 0, steer: 0, handbrake: false };
     this.keys = new Set();
     this.touch = { throttle: 0, brake: 0, steerLeft: 0, steerRight: 0, handbrake: false };
+    /** pointerId -> { btn, action } for every finger currently holding a control */
+    this.held = new Map();
     this.reverseLatch = false;
-    this.callbacks = { onReset, onCamera, onLights, onIndicator, onReverse, onMute };
+    this.callbacks = { onReset, onCamera, onLights, onIndicator, onReverse, onMute, onSound };
     this.isTouch = matchMedia('(hover: none), (pointer: coarse)').matches || navigator.maxTouchPoints > 0;
 
     this.#bindKeyboard();
@@ -50,15 +52,20 @@ export class Controls {
       }
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
-    window.addEventListener('blur', () => this.releaseAll());
+    // Losing focus only drops the KEYBOARD: an embedded page can lose focus to
+    // its host while a finger is still on a pedal, and clearing touch there
+    // would cut the throttle mid-corner. Touch is released by its own pointer
+    // events, and by visibilitychange when the page is actually backgrounded.
+    window.addEventListener('blur', () => this.keys.clear());
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) this.releaseAll();
     });
   }
 
-  /** Clears every held input — used on blur, tab switch and pointer loss. */
+  /** Clears every held input — used on tab switch and when the page is hidden. */
   releaseAll() {
     this.keys.clear();
+    this.held?.clear();
     this.touch.throttle = 0;
     this.touch.brake = 0;
     this.touch.steerLeft = 0;
@@ -80,6 +87,7 @@ export class Controls {
           <button class="touch-btn mini" data-tap="camera" aria-label="Camera">CAM</button>
           <button class="touch-btn mini" data-tap="reset" aria-label="Reset car">RESET</button>
           <button class="touch-btn mini" data-tap="lights" aria-label="Lights">LIGHT</button>
+          <button class="touch-btn mini" data-tap="sound" aria-label="Sound">SND</button>
         </div>
         <div class="touch-row">
           <button class="touch-btn mini" data-toggle="reverse" aria-label="Reverse gear">R</button>
@@ -100,24 +108,49 @@ export class Controls {
         default: break;
       }
     };
+    this._setHold = setHold;
+
+    /**
+     * Which finger is holding which button. Every release is matched by
+     * pointerId: without that, letting go of the steering arrow released the
+     * throttle too, because one pointerup cleared every pressed button — which
+     * is exactly the "the gas lets go by itself" bug.
+     */
+    const held = this.held;
+
+    const pressButton = (btn, action, pointerId) => {
+      // the same finger cannot hold two buttons, and a button pressed twice by
+      // two fingers stays held until the last of them lifts
+      held.set(pointerId, { btn, action });
+      btn.classList.add('active');
+      setHold(action, true);
+    };
+
+    const releasePointer = (pointerId) => {
+      const entry = held.get(pointerId);
+      if (!entry) return false;
+      held.delete(pointerId);
+      const stillHeld = [...held.values()].some((h) => h.action === entry.action);
+      entry.btn.classList.toggle('active', stillHeld);
+      if (!stillHeld) setHold(entry.action, false);
+      return true;
+    };
+    this._releasePointer = releasePointer;
 
     for (const btn of pad.querySelectorAll('[data-hold]')) {
       const action = btn.dataset.hold;
-      const press = (e) => {
+      btn.addEventListener('pointerdown', (e) => {
         e.preventDefault();
-        btn.setPointerCapture?.(e.pointerId);
-        btn.classList.add('active');
-        setHold(action, true);
+        // capture keeps the button held even if the finger slides off it
+        try { btn.setPointerCapture(e.pointerId); } catch { /* not supported */ }
+        pressButton(btn, action, e.pointerId);
+      });
+      const up = (e) => {
+        e.preventDefault();
+        releasePointer(e.pointerId);
       };
-      const release = (e) => {
-        e?.preventDefault?.();
-        btn.classList.remove('active');
-        setHold(action, false);
-      };
-      btn.addEventListener('pointerdown', press);
-      btn.addEventListener('pointerup', release);
-      btn.addEventListener('pointercancel', release);
-      btn.addEventListener('lostpointercapture', release);
+      btn.addEventListener('pointerup', up);
+      btn.addEventListener('pointercancel', up);
       btn.addEventListener('contextmenu', (e) => e.preventDefault());
     }
 
@@ -129,6 +162,7 @@ export class Controls {
         if (action === 'camera') this.callbacks.onCamera?.();
         if (action === 'reset') this.callbacks.onReset?.();
         if (action === 'lights') this.callbacks.onLights?.();
+        if (action === 'sound') this.callbacks.onSound?.();
       });
       const off = () => btn.classList.remove('active');
       btn.addEventListener('pointerup', off);
@@ -145,15 +179,19 @@ export class Controls {
     });
     this.reverseBtn = reverseBtn;
 
-    // anything still held when the pointer dies anywhere gets cleared
-    window.addEventListener('pointerup', () => {
-      for (const b of pad.querySelectorAll('.touch-btn.active')) {
-        b.classList.remove('active');
-        if (b.dataset.hold) setHold(b.dataset.hold, false);
-      }
-    });
+    // Safety net for a pointer that dies outside its button (finger dragged off
+    // the page, gesture stolen by the host). Only the pointer that actually
+    // ended is released — never every held button.
+    for (const type of ['pointerup', 'pointercancel']) {
+      window.addEventListener(type, (e) => releasePointer(e.pointerId));
+    }
 
     return pad;
+  }
+
+  /** Lights the SND button while audio is actually producing sound. */
+  setSoundState(on) {
+    this.pad?.querySelector('[data-tap="sound"]')?.classList.toggle('latched', Boolean(on));
   }
 
   setReverseLatch(on) {

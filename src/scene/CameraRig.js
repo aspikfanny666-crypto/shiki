@@ -102,18 +102,19 @@ export class CameraRig {
     const swayTarget = MathUtils.clamp(accel / 9.81, -1.2, 1.2) * rig.sway + (brake - throttle) * 0.12 * rig.sway;
     this._accelSway += (swayTarget - this._accelSway) * Math.min(1, dt * 5);
 
-    // when reversing, ease the chase camera round so the driver sees where the
-    // car is going without a hard cut
+    // Reversing keeps the camera BEHIND the car — which is where it is going —
+    // and simply tucks in a little and lifts, so more of the ground behind the
+    // boot is visible. Swinging the rig round to the nose, as this used to do,
+    // flips left and right under the player's thumbs mid-manoeuvre.
     const reverseTarget = reversing && this.mode !== 'cockpit' && this.mode !== 'hood' ? 1 : 0;
     this._reverseBlend += (reverseTarget - this._reverseBlend) * Math.min(1, dt * 2.2);
 
     this._desired.copy(rig.offset);
     this._desired.z += this._speed01 * rig.speedPull + this._accelSway * 0.55;
     this._desired.y += this._speed01 * -0.12 + Math.max(0, this._accelSway) * 0.12;
-    // blend the chase position towards the front of the car when reversing
     if (this._reverseBlend > 0.01) {
-      this._desired.z = MathUtils.lerp(this._desired.z, -Math.abs(this._desired.z) * 0.85, this._reverseBlend);
-      this._desired.y = MathUtils.lerp(this._desired.y, this._desired.y + 0.25, this._reverseBlend);
+      this._desired.z -= 0.9 * this._reverseBlend;
+      this._desired.y += 0.45 * this._reverseBlend;
     }
 
     // a portrait phone is narrow: pull back and up so the car and the road
@@ -135,7 +136,12 @@ export class CameraRig {
     this._desired.y = Math.max(this._desired.y, 0.45);
 
     this._look.copy(rig.look);
-    if (this._reverseBlend > 0.01) this._look.z = MathUtils.lerp(this._look.z, Math.abs(this._look.z) * 0.6, this._reverseBlend);
+    // look closer to the car when reversing, so the boot and the ground behind
+    // it are both in frame
+    if (this._reverseBlend > 0.01) {
+      this._look.z = MathUtils.lerp(this._look.z, this._look.z * 0.25, this._reverseBlend);
+      this._look.y = MathUtils.lerp(this._look.y, this._look.y * 0.6, this._reverseBlend);
+    }
     this._look.applyQuaternion(target.quaternion).add(target.position);
 
     this.camera.position.lerp(this._desired, smoothing);
