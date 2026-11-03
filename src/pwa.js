@@ -35,6 +35,9 @@ export const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent)
 
 export function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return Promise.resolve(null);
+  // The single-page artifact bundle sets this: it ships no worker, and there is
+  // nothing for one to cache that the page does not already carry inline.
+  if (window.__NO_SERVICE_WORKER__) return Promise.resolve(null);
   if (isEmbedded()) return Promise.resolve(null);
   if (!import.meta.env.PROD) return Promise.resolve(null);
   // `base: './'` means the worker sits next to index.html whatever subdirectory
