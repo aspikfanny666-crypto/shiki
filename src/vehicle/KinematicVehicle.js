@@ -188,4 +188,9 @@ export class KinematicVehicle {
       '  missing: collisions, suspension travel, tyre slip',
     ].join('\n');
   }
+
+  /** Symmetry with VehiclePhysics: there is no world to remove anything from. */
+  dispose() {
+    this.ready = false;
+  }
 }

@@ -51,18 +51,49 @@ function buildWave(ctx, orders, { tilt = 1, harmonics = 64 } = {}) {
   return ctx.createPeriodicWave(real, imag, { disableNormalization: false });
 }
 
-/** Cross-plane V8 exhaust spectrum. Keys are harmonics of rpm/120, so k = 2 × order. */
-const ORDERS_CRUISE = {
-  1: 0.10, 2: 0.20, 3: 0.12, 4: 0.26, 5: 0.10, 6: 0.22, 7: 0.09,
-  8: 1.00, 9: 0.08, 10: 0.15, 12: 0.18, 14: 0.09,
-  16: 0.42, 20: 0.10, 24: 0.16, 28: 0.07, 32: 0.09, 40: 0.05, 48: 0.03,
+/**
+ * Exhaust spectra, one pair per engine layout. Keys are harmonics of rpm/120,
+ * so k = 2 × engine order.
+ *
+ * The difference between the two cars here is not a filter setting, it is the
+ * firing pattern:
+ *
+ *   • A cross-plane V8 fires four times per cycle → order 4 dominates (k = 8),
+ *     and because the two banks fire unevenly there is real energy on the HALF
+ *     orders (k odd). That half-order content is the V8 burble.
+ *   • An inline six fires three times per revolution, perfectly evenly → order
+ *     3 dominates (k = 6) and the odd harmonics all but vanish. Nothing is
+ *     left to beat against anything else, which is exactly why a straight six
+ *     howls instead of burbling.
+ */
+const SPECTRA = {
+  'v8-crossplane': {
+    cruise: {
+      1: 0.10, 2: 0.20, 3: 0.12, 4: 0.26, 5: 0.10, 6: 0.22, 7: 0.09,
+      8: 1.00, 9: 0.08, 10: 0.15, 12: 0.18, 14: 0.09,
+      16: 0.42, 20: 0.10, 24: 0.16, 28: 0.07, 32: 0.09, 40: 0.05, 48: 0.03,
+    },
+    load: {
+      1: 0.14, 2: 0.24, 3: 0.16, 4: 0.30, 5: 0.14, 6: 0.26, 7: 0.13,
+      8: 1.00, 9: 0.14, 10: 0.22, 12: 0.30, 14: 0.18,
+      16: 0.72, 20: 0.26, 24: 0.44, 28: 0.22, 32: 0.30, 40: 0.20, 48: 0.14, 56: 0.09,
+    },
+  },
+  i6: {
+    cruise: {
+      2: 0.14, 4: 0.12,
+      6: 1.00, 8: 0.10, 10: 0.07,
+      12: 0.46, 18: 0.22, 24: 0.14, 30: 0.08, 36: 0.05, 42: 0.03,
+    },
+    load: {
+      2: 0.18, 4: 0.16,
+      6: 1.00, 8: 0.16, 10: 0.12,
+      12: 0.78, 18: 0.50, 24: 0.34, 30: 0.24, 36: 0.17, 42: 0.11, 48: 0.07,
+    },
+  },
 };
 
-const ORDERS_LOAD = {
-  1: 0.14, 2: 0.24, 3: 0.16, 4: 0.30, 5: 0.14, 6: 0.26, 7: 0.13,
-  8: 1.00, 9: 0.14, 10: 0.22, 12: 0.30, 14: 0.18,
-  16: 0.72, 20: 0.26, 24: 0.44, 28: 0.22, 32: 0.30, 40: 0.20, 48: 0.14, 56: 0.09,
-};
+const spectrumFor = (layout) => SPECTRA[layout] ?? SPECTRA['v8-crossplane'];
 
 export class EngineAudio {
   /**
@@ -76,6 +107,7 @@ export class EngineAudio {
     this.settings = settings;
     this.idleRpm = engine.idleRpm ?? 800;
     this.redlineRpm = engine.redlineRpm ?? 7200;
+    this.spectrum = spectrumFor(engine.layout);
 
     this.ctx = null;
     this.externalContext = context;
@@ -180,8 +212,8 @@ export class EngineAudio {
   }
 
   #buildEngine(ctx) {
-    this.waveCruise = buildWave(ctx, ORDERS_CRUISE, { tilt: 0.55 });
-    this.waveLoad = buildWave(ctx, ORDERS_LOAD, { tilt: 1 });
+    this.waveCruise = buildWave(ctx, this.spectrum.cruise, { tilt: 0.55 });
+    this.waveLoad = buildWave(ctx, this.spectrum.load, { tilt: 1 });
 
     // output of the whole exhaust chain
     this.engineOut = ctx.createGain();
@@ -254,6 +286,24 @@ export class EngineAudio {
     this.subGain.gain.value = 0.0;
     this.sub.connect(this.subGain).connect(this.engineOut);
     this.sub.start();
+  }
+
+  /**
+   * Point the synthesiser at a different engine — used when the player swaps
+   * car. The audio graph and, more importantly, the unlocked AudioContext are
+   * kept: only the two periodic waves are rebuilt and handed to the running
+   * oscillators, so the sound changes without the player having to tap to
+   * start it again.
+   */
+  setEngine(engine = {}) {
+    this.idleRpm = engine.idleRpm ?? this.idleRpm;
+    this.redlineRpm = engine.redlineRpm ?? this.redlineRpm;
+    this.spectrum = spectrumFor(engine.layout);
+    if (!this.ctx || !this.voiceCruise) return;
+    this.waveCruise = buildWave(this.ctx, this.spectrum.cruise, { tilt: 0.55 });
+    this.waveLoad = buildWave(this.ctx, this.spectrum.load, { tilt: 1 });
+    this.voiceCruise.osc.setPeriodicWave(this.waveCruise);
+    this.voiceLoad.osc.setPeriodicWave(this.waveLoad);
   }
 
   #buildNoiseLayers(ctx) {

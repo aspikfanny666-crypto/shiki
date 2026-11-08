@@ -7,11 +7,13 @@ import { DEFAULTS } from '../settings.js';
  * credit is always reachable from the UI.
  */
 export class SettingsPanel {
-  constructor(container, settings, { credit = null, onAction = () => {}, getAudioStatus = null, install = null } = {}) {
+  constructor(container, settings, { credit = null, onAction = () => {}, getAudioStatus = null, install = null, cars = null } = {}) {
     this.settings = settings;
     this.onAction = onAction;
     this.getAudioStatus = getAudioStatus;
     this.install = install;
+    this.cars = cars;
+    this.credit = credit;
 
     this.button = document.createElement('button');
     this.button.className = 'icon-btn settings-btn';
@@ -86,7 +88,24 @@ export class SettingsPanel {
     el.className = s.running && !blockedByHost ? 'ok' : 'warn';
   }
 
-  #render(credit) {
+  /** After a car swap, the About section has to name the new model's author. */
+  setCredit(credit) {
+    this.credit = credit;
+    const el = this.el.querySelector('[data-credit]');
+    if (el) el.innerHTML = this.#creditHtml();
+  }
+
+  #creditHtml() {
+    const c = this.credit ?? {};
+    const licenceUrl = c.license?.match(/\((https?:[^)]+)\)/)?.[1] ?? 'https://creativecommons.org/licenses/by/4.0/';
+    const author = (c.author ?? 'unknown').split(' (')[0];
+    return `Vehicle model: <b>${c.title ?? 'unknown'}</b> by <b>${author}</b>, licensed `
+      + `<a href="${licenceUrl}" target="_blank" rel="noopener">CC BY 4.0</a>. `
+      + `<a href="${c.source ?? 'https://sketchfab.com'}" target="_blank" rel="noopener">Model page</a>.`;
+  }
+
+  #render(credit = this.credit) {
+    this.credit = credit;
     const s = this.settings;
     const seg = (key, options) => `
       <div class="seg" data-seg="${key}">
@@ -106,6 +125,13 @@ export class SettingsPanel {
         <h2>Settings</h2>
         <button class="icon-btn close" data-close>✕</button>
       </header>
+
+      ${this.cars ? `<h3>Car</h3>
+      <div class="row col"><span>Vehicle</span>
+        ${seg('car', Object.values(this.cars).map((c) => ({ value: c.id, label: c.label })))}
+      </div>
+      <p class="about dim">Switching reloads the model, the physics tuning and the
+      engine note — no page reload, and the sound stays unlocked.</p>` : ''}
 
       <h3>Install</h3>
       <div data-install>${this.#installHtml()}</div>
@@ -147,10 +173,7 @@ export class SettingsPanel {
       <h3>About</h3>
       <p class="about">
         Browser driving simulator — Three.js + Rapier 3D physics.<br>
-        Vehicle model: <b>${credit?.title ?? 'BMW M5 CS (F90)'}</b> by
-        <b>${(credit?.author ?? 'fvrenbld').split(' (')[0]}</b>,
-        licensed <a href="${credit?.license?.match(/\((https?:[^)]+)\)/)?.[1] ?? 'https://creativecommons.org/licenses/by/4.0/'}" target="_blank" rel="noopener">CC BY 4.0</a>.
-        <a href="${credit?.source ?? 'https://sketchfab.com/3d-models/bmw-m5-cs-f90-8f74fb3420e24213aaeea33dc99450a3'}" target="_blank" rel="noopener">Model page</a>.
+        <span data-credit>${this.#creditHtml()}</span>
       </p>
       <p class="about dim">
         Keys: W/S or ↑/↓ drive · A/D or ←/→ steer · Space handbrake ·

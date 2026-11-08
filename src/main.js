@@ -1,8 +1,7 @@
 import { Clock, MathUtils, Vector3 } from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
-import { MODEL_URL } from './config.js';
 import { settings } from './settings.js';
-import { VEHICLE_TUNING } from './vehicleConfig.js';
+import { selectCar, getCar, CARS } from './vehicleConfig.js';
 import { createTestScene } from './scene/TestScene.js';
 import { PhysicsWorld } from './scene/PhysicsWorld.js';
 import { Environment } from './scene/Environment.js';
@@ -32,42 +31,105 @@ const scene3d = createTestScene(container, { settings });
 const { renderer, scene, camera, axes } = scene3d;
 
 // ---------------------------------------------------------------- model ----
-setBootMessage('loading BMW M5 F90…');
 /**
- * The GLB normally comes from public/models. A host that only serves standard
- * web media types (a published artifact) can instead ship it as base64 in a
- * plain script that sets `window.__BMW_MODEL__`; it is decoded here and handed
- * to the loader as bytes.
+ * A car's GLB normally comes from public/models. A host that only serves
+ * standard web media types (a published artifact) can instead ship it as
+ * base64 in a plain script that sets the car's `embedGlobal`; it is decoded
+ * here and handed to the loader as bytes.
  */
-function embeddedModelBytes() {
-  const base64 = window.__BMW_MODEL__;
-  if (typeof base64 !== 'string' || base64.length < 1024) return null;
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  // Hand the loader a blob: URL rather than the raw buffer, so the embedded
-  // model goes through exactly the same load path as a fetched file.
-  return {
-    url: URL.createObjectURL(new Blob([bytes], { type: 'model/gltf-binary' })),
-    buffer: bytes.buffer,
-  };
+const embeddedBlobs = new Map();
+function embeddedModelBytes(car) {
+  if (embeddedBlobs.has(car.id)) return embeddedBlobs.get(car.id);
+  const base64 = window[car.embedGlobal];
+  let result = null;
+  if (typeof base64 === 'string' && base64.length >= 1024) {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    // Hand the loader a blob: URL rather than the raw buffer, so the embedded
+    // model goes through exactly the same load path as a fetched file.
+    result = {
+      url: URL.createObjectURL(new Blob([bytes], { type: 'model/gltf-binary' })),
+      buffer: bytes.buffer,
+    };
+  }
+  embeddedBlobs.set(car.id, result);
+  return result;
 }
 
-// Candidates, so the same bundle works from a dev server, a sub-directory and
-// a published page whose URL has no trailing slash.
-const embedded = embeddedModelBytes();
-const modelSource = embedded
-  ? [embedded.url, embedded.buffer]
-  : [MODEL_URL, new URL(MODEL_URL, document.baseURI).href, new URL(MODEL_URL, import.meta.url).href, `/${MODEL_URL}`];
+/**
+ * Candidates, so the same bundle works from a dev server, a sub-directory and
+ * a published page whose URL has no trailing slash.
+ */
+function modelSourceFor(car) {
+  const embedded = embeddedModelBytes(car);
+  if (embedded) return [embedded.url, embedded.buffer];
+  const u = car.modelUrl;
+  return [u, new URL(u, document.baseURI).href, new URL(u, import.meta.url).href, `/${u}`];
+}
 
-const visual = new VehicleVisual();
-await visual.load({
-  url: modelSource,
-  renderer,
-  onProgress: (e) => {
-    if (e.lengthComputable) setBootMessage(`loading model — ${Math.round((e.loaded / e.total) * 100)}%`);
-  },
-});
+/**
+ * A single-page build can carry more than one car. Only the first is a
+ * `<script>` in the page; the rest are published alongside it and listed in
+ * `window.__BMW_EMBED_SCRIPTS__` as { carId: 'file.js' }, so a 10 MB second
+ * model is fetched the first time somebody actually switches to it instead of
+ * on every page load.
+ */
+function loadEmbedScript(car) {
+  const src = window.__BMW_EMBED_SCRIPTS__?.[car.id];
+  if (!src || window[car.embedGlobal]) return Promise.resolve();
+  return new Promise((resolve) => {
+    const el = document.createElement('script');
+    el.src = src;
+    el.onload = () => resolve();
+    el.onerror = () => {
+      console.warn(`[model] "${src}" could not be loaded; falling back to ${car.modelUrl}`);
+      resolve();
+    };
+    document.head.appendChild(el);
+  });
+}
+
+async function loadVisual(car) {
+  setBootMessage(`loading ${car.name}…`);
+  await loadEmbedScript(car);
+  const next = new VehicleVisual();
+  await next.load({
+    url: modelSourceFor(car),
+    renderer,
+    onProgress: (e) => {
+      if (e.lengthComputable) setBootMessage(`${car.label} — ${Math.round((e.loaded / e.total) * 100)}%`);
+    },
+  });
+  return next;
+}
+
+/**
+ * Free a vehicle's GPU memory. Three.js does not do this on `remove()`, and a
+ * player flicking between cars would otherwise leak a geometry set and a few
+ * dozen textures per swap. Materials and textures are collected into sets
+ * first, because the same material is shared by many meshes.
+ */
+function disposeVisual(v) {
+  if (!v) return;
+  const materials = new Set();
+  const textures = new Set();
+  v.root.traverse((o) => {
+    if (o.isMesh || o.isInstancedMesh) {
+      o.geometry?.dispose();
+      for (const m of Array.isArray(o.material) ? o.material : [o.material]) if (m) materials.add(m);
+    }
+  });
+  for (const m of materials) {
+    for (const value of Object.values(m)) if (value?.isTexture) textures.add(value);
+    m.dispose();
+  }
+  for (const t of textures) t.dispose();
+  v.root.removeFromParent();
+}
+
+let car = selectCar(settings.get('car'));
+let visual = await loadVisual(car);
 scene.add(visual.root);
 
 // --------------------------------------------------------------- physics ---
@@ -86,11 +148,13 @@ try {
 const physicsWorld = rapierReady ? new PhysicsWorld(RAPIER, scene) : new NullPhysicsWorld(scene);
 const environment = new Environment(physicsWorld, scene, { quality: settings.get('quality') });
 
-const physics = rapierReady
+const buildPhysics = () => (rapierReady
   ? new VehiclePhysics(RAPIER, physicsWorld.world, visual)
-  : new KinematicVehicle(visual);
-const lights = new VehicleLights(visual, { settings });
-const audio = new EngineAudio({ settings, engine: VEHICLE_TUNING.engine });
+  : new KinematicVehicle(visual));
+
+let physics = buildPhysics();
+let lights = new VehicleLights(visual, { settings });
+const audio = new EngineAudio({ settings, engine: car.tuning.engine });
 const SPAWN = new Vector3(0, rapierReady ? 0.08 : 0, 0);
 physics.reset(SPAWN);
 
@@ -170,6 +234,7 @@ registerServiceWorker();
 
 const settingsPanel = new SettingsPanel(container, settings, {
   credit: visual.credit,
+  cars: CARS,
   install,
   getAudioStatus: () => audio.diagnose(),
   onAction: (action) => {
@@ -182,13 +247,70 @@ debugPanel.addButton('Reset car (R)', resetCar);
 debugPanel.addButton('Bounds box', () => visual.showBoundsHelper(scene, !(visual.boxHelper?.visible ?? false)));
 debugPanel.addButton('World axes', () => { axes.visible = !axes.visible; });
 
+/**
+ * Switch car without reloading the page.
+ *
+ * Order matters: the physics body has to leave the world before the visual it
+ * was measured from is disposed, and `selectCar` has to run before the new
+ * VehicleVisual and VehiclePhysics are built, because both read the tuning,
+ * the material patterns and the reference dimensions in their constructors.
+ *
+ * The AudioContext is deliberately NOT rebuilt — it is unlocked, and making
+ * the player tap again to get sound back after changing car would be a poor
+ * trade for a spectrum that can be swapped in place.
+ */
+let swapping = false;
+async function swapCar(id) {
+  if (swapping || id === car.id) return;
+  const next = getCar(id);
+  swapping = true;
+  loader?.classList.remove('done');
+  if (loader && !loader.isConnected) container.appendChild(loader);
+  setBootMessage(`loading ${next.name}…`);
+
+  try {
+    car = selectCar(id);
+    const nextVisual = await loadVisual(car);
+
+    physics.dispose();
+    disposeVisual(visual);
+
+    visual = nextVisual;
+    scene.add(visual.root);
+    physics = buildPhysics();
+    physics.steeringSensitivity = settings.get('steeringSensitivity');
+    lights = new VehicleLights(visual, { settings });
+    lights.setBeamsEnabled(settings.get('headlightBeams'));
+    visual.setShadows(settings.get('shadows'), settings.get('quality'));
+    visual.setGlassQuality(settings.get('quality'));
+    audio.setEngine(car.tuning.engine);
+
+    rig.setTarget(visual.root);
+    scene3d.follow(visual.root.position, visual.root.quaternion);
+    physics.reset(SPAWN);
+    rig.snap();
+
+    debugPanel.render(visual, physics);
+    settingsPanel.setCredit(visual.credit);
+    controls.setReverseLatch(false);
+    controls.releaseAll();
+    reportToConsole(visual);
+  } finally {
+    swapping = false;
+    loader?.classList.add('done');
+    setTimeout(() => loader?.remove(), 600);
+  }
+}
+
 // settings -> systems
 settings.subscribe((key) => {
+  if (key === 'car') swapCar(settings.get('car'));
   if (key === 'quality' || key === 'shadows' || key === 'reflections' || key === '*') {
     scene3d.applySettings();
     environment.setQuality(settings.get('quality'));
     environment.setShadows(settings.get('shadows'));
     visual.setShadows(settings.get('shadows'), settings.get('quality'));
+    visual.setGlassQuality(settings.get('quality'));
   }
   if (key === 'headlightBeams' || key === '*') lights.setBeamsEnabled(settings.get('headlightBeams'));
   if (key === 'steeringSensitivity' || key === '*') physics.steeringSensitivity = settings.get('steeringSensitivity');
@@ -200,6 +322,7 @@ settings.subscribe((key) => {
 physics.steeringSensitivity = settings.get('steeringSensitivity');
 environment.setShadows(settings.get('shadows'));
 visual.setShadows(settings.get('shadows'), settings.get('quality'));
+visual.setGlassQuality(settings.get('quality'));
 
 // ------------------------------------------------------------ render loop ---
 const clock = new Clock();
@@ -256,9 +379,17 @@ renderer.setAnimationLoop(() => {
 
 // -------------------------------------------------------------- debugging ---
 window.__BMW__ = {
-  visual, physics, physicsWorld, environment, lights, controls, settings,
+  // `visual`, `physics` and `lights` are replaced when the car changes, so
+  // they are getters: a console reference taken before a swap still resolves
+  // to the car that is actually on the road.
+  get visual() { return visual; },
+  get physics() { return physics; },
+  get lights() { return lights; },
+  get car() { return car; },
+  get report() { return buildReportJSON(visual); },
+  swapCar,
+  physicsWorld, environment, controls, settings,
   scene, camera, rig, hud, renderer, RAPIER, rapierReady, audio,
-  report: buildReportJSON(visual),
   dumpHierarchy: () => console.log(window.__BMW__.report.tree),
   drive: (throttle = 0, brake = 0, steer = 0, handbrake = false) => {
     // The touch pedals ramp in from the moment they are pressed, so a scripted

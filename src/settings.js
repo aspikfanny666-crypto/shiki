@@ -15,6 +15,7 @@ export const QUALITY_PRESETS = {
 };
 
 export const DEFAULTS = {
+  car: 'm5-f90', // a key of CARS in src/cars.js
   quality: 'medium', // low | medium | high
   shadows: true,
   reflections: true,

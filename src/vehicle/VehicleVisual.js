@@ -1,6 +1,5 @@
 import { Box3, Box3Helper, BoxGeometry, Color, Group, MathUtils, Mesh, MeshBasicMaterial, MeshPhysicalMaterial, Object3D, Vector3 } from 'three';
-import { BMW_M5_F90_REFERENCE, MODEL_URL } from '../config.js';
-import { WHEEL_EXTRACTION } from '../vehicleConfig.js';
+import { ACTIVE_CAR, VEHICLE_REFERENCE, WHEEL_EXTRACTION } from '../vehicleConfig.js';
 import { loadVehicleModel } from '../model/loadVehicleModel.js';
 import { analyzeHierarchy } from '../model/analyzeHierarchy.js';
 import { computeModelStats } from '../model/modelStats.js';
@@ -50,7 +49,11 @@ export class VehicleVisual {
     this.credit = null;
   }
 
-  async load({ url = MODEL_URL, renderer = null, onProgress = null } = {}) {
+  async load({ url = ACTIVE_CAR.modelUrl, renderer = null, onProgress = null } = {}) {
+    // Snapshot the car that is active now: the bindings in vehicleConfig move
+    // when the player switches, and this instance must keep describing the
+    // model it actually loaded.
+    this.car = ACTIVE_CAR;
     const result = await loadVehicleModel(url, { renderer, onProgress });
 
     if (result.ok) {
@@ -59,7 +62,9 @@ export class VehicleVisual {
       // record the candidate that actually resolved, not the list we tried
       this.source = { kind: 'glb', url: result.url, loadMs: result.loadMs, attempts: result.attempts ?? [] };
       const extras = result.gltf.parser?.json?.asset?.extras;
-      if (extras) this.credit = { title: extras.title, author: extras.author, license: extras.license, source: extras.source };
+      this.credit = extras?.title
+        ? { title: extras.title, author: extras.author, license: extras.license, source: extras.source }
+        : { ...this.car.credit };
     } else {
       this.model = createPlaceholderVehicle();
       this.gltf = { animations: [] };
@@ -103,8 +108,9 @@ export class VehicleVisual {
       this.extraction = { ...report, ms: Math.round(performance.now() - t0) };
       extractedWheels = wheels;
       if (!wheels) this.warnings.push(`wheel extraction failed: ${report.warnings.join('; ')}`);
-      // the file has no textures at all, so the tyres get a generated tread
-      if (wheels) this.tyreDetail = detailTyres(wheels);
+      // Only for a model with no textures of its own: painting a tread onto a
+      // wheel that already has a base-colour map would overwrite the author's.
+      if (wheels && this.car.generateTyreTread) this.tyreDetail = detailTyres(wheels);
     }
 
     // 4. parts, by node name -> material name -> geometry, never invented
@@ -120,9 +126,9 @@ export class VehicleVisual {
 
     // 7. controller
     this.wheelController = new WheelVisualController(this.wheels, {
-      wheelbase: this.wheelbase ?? BMW_M5_F90_REFERENCE.wheelbase,
-      trackFront: this.trackFront ?? BMW_M5_F90_REFERENCE.trackFront,
-      maxSteerDeg: 34,
+      wheelbase: this.wheelbase ?? VEHICLE_REFERENCE.wheelbase,
+      trackFront: this.trackFront ?? VEHICLE_REFERENCE.trackFront,
+      maxSteerDeg: this.car.tuning.steering.maxAngleDeg,
     });
 
     this.#upgradeMaterials();
@@ -221,7 +227,7 @@ export class VehicleVisual {
     this.wheelbase = frontZ !== null && rearZ !== null ? +Math.abs(rearZ - frontZ).toFixed(3) : null;
     this.trackFront = fl && fr ? +Math.abs(fr.x - fl.x).toFixed(3) : null;
     this.trackRear = rl && rr ? +Math.abs(rr.x - rl.x).toFixed(3) : null;
-    this.wheelRadius = this.wheels.frontLeft?.radius ?? this.wheels.rearLeft?.radius ?? BMW_M5_F90_REFERENCE.wheelDiameterFront / 2;
+    this.wheelRadius = this.wheels.frontLeft?.radius ?? this.wheels.rearLeft?.radius ?? VEHICLE_REFERENCE.wheelDiameterFront / 2;
   }
 
   /**
@@ -282,6 +288,45 @@ export class VehicleVisual {
     return this.shadowCasters;
   }
 
+  /**
+   * Real transmission glass costs a whole extra scene render: three.js draws
+   * the world again into a transmission target every frame so the glass has
+   * something to refract. On the M4 that measured about a quarter of the frame
+   * on its own, for an effect you cannot see through a windscreen at speed.
+   *
+   * So it is a quality setting, like everything else of that cost: refracting
+   * glass on 'high', ordinary alpha-blended glass below it. The original
+   * values are kept on the material, so switching back restores exactly what
+   * the author authored.
+   *
+   * @param {'low'|'medium'|'high'} quality
+   */
+  setGlassQuality(quality) {
+    const refract = quality === 'high';
+    const seen = new Set();
+    let changed = 0;
+    this.root.traverse((o) => {
+      if (!o.isMesh || !o.material) return;
+      for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+        if (!m || seen.has(m.uuid)) continue;
+        seen.add(m.uuid);
+        if (m.userData.authoredTransmission === undefined) {
+          if (!(m.transmission > 0)) continue;
+          m.userData.authoredTransmission = m.transmission;
+          m.userData.authoredOpacity = m.opacity;
+          m.userData.authoredTransparent = m.transparent;
+        }
+        m.transmission = refract ? m.userData.authoredTransmission : 0;
+        m.transparent = refract ? m.userData.authoredTransparent : true;
+        m.opacity = refract ? m.userData.authoredOpacity : 0.34;
+        m.needsUpdate = true;
+        changed += 1;
+      }
+    });
+    this.glassQuality = { refract, materials: changed };
+    return changed;
+  }
+
   /** Runtime shadow toggle from the settings panel. */
   setShadows(enabled, quality = 'medium') {
     this.setShadowMode(!enabled ? 'off' : quality === 'high' ? 'real' : 'proxy');
@@ -319,6 +364,23 @@ export class VehicleVisual {
   #upgradeMaterials() {
     const seen = new Map();
     const upgrades = [];
+
+    // A model that ships its own PBR maps is left exactly as the author made
+    // it — restyling it would throw away base-colour, metallic-roughness,
+    // normal and emissive work that is already correct. Only the environment
+    // intensity is set, so both cars sit in the same lighting.
+    if (!this.car.restyleMaterials) {
+      this.root.traverse((o) => {
+        if (!o.isMesh || !o.material) return;
+        for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+          if (!m || seen.has(m.uuid)) continue;
+          seen.set(m.uuid, true);
+          m.envMapIntensity = 1.0;
+        }
+      });
+      this.materialUpgrades = [{ material: '(all)', change: 'left as authored: the model ships its own PBR textures' }];
+      return;
+    }
 
     const forEachMaterial = (fn) => {
       this.root.traverse((o) => {

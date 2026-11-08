@@ -1,14 +1,17 @@
 /**
- * Packs dist/ into the three files a published Claude artifact can host:
+ * Packs dist/ into the files a published Claude artifact can host:
  *
- *   index.html  the page, with the CSS inlined
- *   app.js      the bundle
- *   model.js    the GLB as base64 in `window.__BMW_MODEL__`
+ *   index.html   the page, with the CSS inlined
+ *   app.js       the bundle
+ *   model.js     the first car's GLB as base64 in its embed global
+ *   model-*.js   one per extra car, fetched only when somebody switches to it
  *
- * The model travels inside a script because the artifact host only serves
+ * A model travels inside a script because the artifact host only serves
  * standard web media types and refuses .glb / application/octet-stream;
  * main.js picks the global up, turns it into a blob: URL and hands that to
- * GLTFLoader — the same code path as a fetched file.
+ * GLTFLoader — the same code path as a fetched file. Only the default car is
+ * a <script> in the page: the rest are listed in `window.__BMW_EMBED_SCRIPTS__`
+ * and injected on demand, so opening the page does not cost 20 MB.
  *
  * Usage: node scripts/build-artifact.mjs <output-directory>
  */
@@ -31,10 +34,16 @@ const title = html.match(/<title>([^<]*)<\/title>/)?.[1] ?? 'BMW M5 F90 Simulato
 
 await mkdir(out, { recursive: true });
 await writeFile(join(out, 'app.js'), await readFile(join(DIST, 'assets', js)));
-await writeFile(
-  join(out, 'model.js'),
-  `window.__BMW_MODEL__=${JSON.stringify((await readFile(new URL('../public/models/bmw-f90.glb', import.meta.url))).toString('base64'))};`,
-);
+
+const { CARS, DEFAULT_CAR_ID } = await import('../src/cars.js');
+const lazy = {};
+for (const car of Object.values(CARS)) {
+  const file = car.id === DEFAULT_CAR_ID ? 'model.js' : `model-${car.id}.js`;
+  const glb = await readFile(new URL(`../public/${car.modelUrl}`, import.meta.url));
+  await writeFile(join(out, file), `window.${car.embedGlobal}=${JSON.stringify(glb.toString('base64'))};`);
+  if (car.id !== DEFAULT_CAR_ID) lazy[car.id] = file;
+  console.log(`  ${file.padEnd(16)} ${(glb.length / 1024 / 1024).toFixed(1)} MB of GLB → base64`);
+}
 
 // The artifact is one page in someone else's frame: no manifest, no service
 // worker (both are useless there), and the boot text says so.
@@ -50,7 +59,10 @@ ${await readFile(join(DIST, 'assets', css), 'utf8')}
 </style>
 </head>
 <body>
-<script>window.__NO_SERVICE_WORKER__ = true;</script>
+<script>
+window.__NO_SERVICE_WORKER__ = true;
+window.__BMW_EMBED_SCRIPTS__ = ${JSON.stringify(lazy)};
+</script>
 <div id="app"></div>
 <div id="boot">
   <div class="mark">BMW M5 F90</div>
@@ -68,4 +80,7 @@ const size = (p) => readFile(p).then((b) => `${(b.length / 1024 / 1024).toFixed(
 console.log(`artifact bundle in ${out}`);
 console.log(`  index.html  ${(page.length / 1024).toFixed(0)} kB`);
 console.log(`  app.js      ${await size(join(out, 'app.js'))}`);
-console.log(`  model.js    ${await size(join(out, 'model.js'))}`);
+for (const car of Object.values(CARS)) {
+  const file = car.id === DEFAULT_CAR_ID ? 'model.js' : `model-${car.id}.js`;
+  console.log(`  ${file.padEnd(16)}${await size(join(out, file))}${car.id === DEFAULT_CAR_ID ? '' : '  (lazy)'}`);
+}

@@ -8,28 +8,22 @@ import {
   MeshBasicMaterial,
   PlaneGeometry,
   SpotLight,
+  SphereGeometry,
   Vector3,
 } from 'three';
-import { extractLamps } from './LampExtraction.js';
 
 /**
- * Vehicle lighting, driven by the car's OWN lamp geometry.
+ * Vehicle lighting.
  *
- * The export merged everything by material, so the headlight internals share a
- * material with parts all over the car — lighting that material lights the
- * whole vehicle, and a floating quad in front of the nose looks like a floating
- * quad. LampExtraction therefore cuts the lamps out of the body meshes by
- * volume; this class animates the emissive on those real meshes, and adds a
- * halo at each lamp's measured centre for bloom.
+ * The GLB's headlights are merged into the body meshes, so they cannot be lit
+ * by changing a material. Instead a thin light LAYER is added as children of
+ * the vehicle root — emissive lens quads and glow sprites positioned from the
+ * measured bounding box — and the GLB geometry is left untouched.
  *
- * Where the export kept a usable light material of its own (the centre brake
- * light, the indicator repeater) that material is driven too.
+ * Where the export DID keep a usable material (the centre brake light's
+ * `Brakelightm1Mtl`, the indicator's `Indicatorrf1Mtl`) that material is driven
+ * directly, so real model geometry lights up alongside the added layer.
  */
-
-const DAYLIGHT = new Color(0xdce9ff);
-const AMBER = new Color(0xff9b1a);
-const TAIL_RED = new Color(0xff1a0a);
-const REVERSE_WHITE = new Color(0xeef4ff);
 
 function glowTexture() {
   const s = 128;
@@ -38,7 +32,7 @@ function glowTexture() {
   const ctx = c.getContext('2d');
   const g = ctx.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
   g.addColorStop(0, 'rgba(255,255,255,1)');
-  g.addColorStop(0.3, 'rgba(255,255,255,0.45)');
+  g.addColorStop(0.25, 'rgba(255,255,255,0.55)');
   g.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, s, s);
@@ -46,7 +40,9 @@ function glowTexture() {
 }
 
 export class VehicleLights {
-  /** @param {import('./VehicleVisual.js').VehicleVisual} visual */
+  /**
+   * @param {import('./VehicleVisual.js').VehicleVisual} visual
+   */
   constructor(visual, { settings } = {}) {
     this.visual = visual;
     this.settings = settings;
@@ -54,60 +50,106 @@ export class VehicleLights {
     this.root.name = 'VehicleLights';
     visual.root.add(this.root);
 
-    this.state = { headlights: false, brake: false, reverse: false, indicator: 0 };
+    // daylight scene: lamps start off, exactly like a real car parked in the sun
+    this.state = { headlights: false, brake: false, reverse: false, indicator: 0 }; // indicator: -1 left, 1 right
     this.blinkPhase = 0;
     this.blinkOn = false;
-    this.glow = glowTexture();
-
-    this.#measure();
-
-    const { lamps, report } = extractLamps(visual.model, visual.root);
-    this.realLamps = lamps;
-    this.extraction = report;
-
-    this.#buildGlow();
-    this.#collectModelMaterials();
+    this.lamps = {};
+    this.modelMaterials = { brake: [], indicatorLeft: [], indicatorRight: [] };
     this.beams = [];
-    if (settings?.get('headlightBeams')) this.#createBeams();
+
+    /**
+     * Some models light themselves. The M4 CS ships an emissive map with the
+     * head and tail lights already burning, so adding this layer on top would
+     * put a second, differently-placed set of lamps over the author's. For
+     * those cars the layer is simply not built: the state and the HUD lamp
+     * still work, there is just nothing of ours drawn.
+     */
+    this.enabled = visual.car?.lightLayer !== false;
+    if (!this.enabled) return;
+
+    this.glow = glowTexture();
+    this.#measure();
+    this.#buildLamps();
+    this.#collectModelMaterials();
+    this.#buildBeams();
   }
 
   #measure() {
     const box = new Box3().setFromObject(this.visual.model, true);
     const size = box.getSize(new Vector3());
-    this.dims = { halfWidth: size.x / 2, height: size.y, front: box.min.z, rear: box.max.z };
-  }
-
-  /**
-   * A soft halo in front of each real lamp, at the lamp's MEASURED centre.
-   * Emissive geometry alone cannot bloom; this sells that cheaply. Lamps that
-   * were not found get no halo rather than a guessed one.
-   */
-  #buildGlow() {
-    this.glowSprites = {};
-    const add = (key, { color, scale = 1, forward }) => {
-      const lamp = this.realLamps?.[key];
-      if (!lamp) return;
-      const halo = new Mesh(
-        new PlaneGeometry(lamp.size.x * 1.35 * scale, Math.max(lamp.size.y, 0.05) * 2.4 * scale),
-        new MeshBasicMaterial({
-          map: this.glow, color, transparent: true, opacity: 0,
-          depthWrite: false, blending: AdditiveBlending, toneMapped: false,
-        }),
-      );
-      halo.name = `${key}Halo`;
-      halo.position.copy(lamp.centre);
-      halo.position.z += forward;
-      if (forward > 0) halo.rotation.y = Math.PI;
-      halo.renderOrder = 3;
-      this.root.add(halo);
-      this.glowSprites[key] = halo;
+    this.dims = {
+      halfWidth: size.x / 2,
+      length: size.z,
+      front: box.min.z,
+      rear: box.max.z,
+      lampY: 0.67, // headlight centre height, matched to this model's nose
+      tailY: 0.80,
     };
-    add('headlightMain', { color: 0xfff0d0, forward: -0.07 });
-    add('headlightDrl', { color: 0xdce9ff, scale: 0.85, forward: -0.06 });
-    add('tailLight', { color: 0xff2a14, scale: 0.9, forward: 0.07 });
   }
 
-  /** The two light materials the export kept intact. */
+  /** Emissive quads + glow sprites, parented to the car so they move with it. */
+  #buildLamps() {
+    const d = this.dims;
+    const make = (name, { color, width, height, position, rotationY = 0, intensity = 1, glowScale = 1 }) => {
+      const group = new Group();
+      group.name = name;
+      group.position.set(...position);
+      group.rotation.y = rotationY;
+
+      const lens = new Mesh(
+        new PlaneGeometry(width, height),
+        new MeshBasicMaterial({ color, transparent: true, opacity: 0.0, depthWrite: false, blending: AdditiveBlending, toneMapped: false }),
+      );
+      lens.name = `${name}Lens`;
+      group.add(lens);
+
+      const halo = new Mesh(
+        new PlaneGeometry(width * 2.1 * glowScale, height * 3.4 * glowScale),
+        new MeshBasicMaterial({ map: this.glow, color, transparent: true, opacity: 0, depthWrite: false, blending: AdditiveBlending, toneMapped: false }),
+      );
+      halo.name = `${name}Halo`;
+      halo.position.z = rotationY === 0 ? -0.02 : 0.02;
+      group.add(halo);
+
+      this.root.add(group);
+      return { group, lens, halo, intensity, color: new Color(color) };
+    };
+
+    // The bounding box's front face is the tip of the bumper; the lamps sit
+    // back from it, where the nose has already narrowed. Same at the rear.
+    const xOuter = d.halfWidth * 0.62;
+    const front = d.front + 0.26;
+    const rear = d.rear - 0.22;
+
+    this.lamps = {
+      headL: make('HeadlightLeft', { color: 0xfff2d8, width: 0.3, height: 0.07, position: [-xOuter, d.lampY, front], intensity: 1.0 }),
+      headR: make('HeadlightRight', { color: 0xfff2d8, width: 0.3, height: 0.07, position: [xOuter, d.lampY, front], intensity: 1.0 }),
+      drlL: make('DrlLeft', { color: 0xdce9ff, width: 0.26, height: 0.022, position: [-xOuter, d.lampY + 0.055, front], intensity: 0.75, glowScale: 0.7 }),
+      drlR: make('DrlRight', { color: 0xdce9ff, width: 0.26, height: 0.022, position: [xOuter, d.lampY + 0.055, front], intensity: 0.75, glowScale: 0.7 }),
+      tailL: make('TailLightLeft', { color: 0xff2a1a, width: 0.34, height: 0.06, position: [-xOuter, d.tailY, rear], rotationY: Math.PI, intensity: 0.55 }),
+      tailR: make('TailLightRight', { color: 0xff2a1a, width: 0.34, height: 0.06, position: [xOuter, d.tailY, rear], rotationY: Math.PI, intensity: 0.55 }),
+      reverseL: make('ReverseLightLeft', { color: 0xf2f6ff, width: 0.12, height: 0.04, position: [-xOuter * 0.5, d.tailY - 0.08, rear], rotationY: Math.PI, intensity: 0.9, glowScale: 0.8 }),
+      reverseR: make('ReverseLightRight', { color: 0xf2f6ff, width: 0.12, height: 0.04, position: [xOuter * 0.5, d.tailY - 0.08, rear], rotationY: Math.PI, intensity: 0.9, glowScale: 0.8 }),
+      indFL: make('IndicatorFrontLeft', { color: 0xff9b1a, width: 0.13, height: 0.035, position: [-xOuter - 0.17, d.lampY - 0.01, front], intensity: 1.0, glowScale: 0.8 }),
+      indFR: make('IndicatorFrontRight', { color: 0xff9b1a, width: 0.13, height: 0.035, position: [xOuter + 0.17, d.lampY - 0.01, front], intensity: 1.0, glowScale: 0.8 }),
+      indRL: make('IndicatorRearLeft', { color: 0xff9b1a, width: 0.13, height: 0.035, position: [-xOuter - 0.15, d.tailY, rear], rotationY: Math.PI, intensity: 1.0, glowScale: 0.8 }),
+      indRR: make('IndicatorRearRight', { color: 0xff9b1a, width: 0.13, height: 0.035, position: [xOuter + 0.15, d.tailY, rear], rotationY: Math.PI, intensity: 1.0, glowScale: 0.8 }),
+    };
+
+    // a small bright core inside each headlight so it reads at a distance
+    for (const key of ['headL', 'headR']) {
+      const core = new Mesh(
+        new SphereGeometry(0.022, 8, 6),
+        new MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, toneMapped: false, depthWrite: false }),
+      );
+      core.name = `${key}Core`;
+      this.lamps[key].group.add(core);
+      this.lamps[key].core = core;
+    }
+  }
+
+  /** Materials the GLB kept that we can genuinely drive. */
   #collectModelMaterials() {
     this.modelMaterials = { brake: [], indicator: [] };
     const parts = this.visual.parts;
@@ -117,9 +159,10 @@ export class VehicleLights {
         node.traverse((o) => {
           if (!o.isMesh || !o.material) return;
           for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
-            if (!m?.emissive) continue;
+            if (!m.emissive) continue;
             m.emissive = new Color(bucket === 'brake' ? 0xff1c0c : 0xff9b1a);
             m.emissiveIntensity = 0;
+            m.toneMapped = true;
             this.modelMaterials[bucket].push(m);
           }
         });
@@ -129,17 +172,21 @@ export class VehicleLights {
     collect(parts?.turnSignals, 'indicator');
   }
 
-  /** Real beams are optional: each one is another light in every shader. */
+  /** Real spot lights — optional, they cost a shadow-free light each. */
+  #buildBeams() {
+    this.beams = [];
+    if (!this.settings?.get('headlightBeams')) return;
+    this.#createBeams();
+  }
+
   #createBeams() {
     if (this.beams.length) return;
-    const lamp = this.realLamps?.headlightMain;
-    const y = lamp ? lamp.centre.y : this.dims.height * 0.45;
-    const z = lamp ? lamp.centre.z : this.dims.front;
+    const d = this.dims;
     for (const side of [-1, 1]) {
-      const spot = new SpotLight(0xfff0d5, 0, 75, Math.PI / 7, 0.45, 1.2);
+      const spot = new SpotLight(0xfff0d5, 0, 70, Math.PI / 7, 0.45, 1.2);
       spot.name = `HeadlightBeam${side < 0 ? 'Left' : 'Right'}`;
-      spot.position.set(side * this.dims.halfWidth * 0.65, y, z);
-      spot.target.position.set(side * this.dims.halfWidth * 0.65, 0.1, z - 30);
+      spot.position.set(side * d.halfWidth * 0.7, d.lampY, d.front);
+      spot.target.position.set(side * d.halfWidth * 0.7, 0.1, d.front - 30);
       spot.castShadow = false;
       this.root.add(spot);
       this.root.add(spot.target);
@@ -148,31 +195,29 @@ export class VehicleLights {
   }
 
   setBeamsEnabled(enabled) {
+    if (!this.enabled) return;
     if (enabled) this.#createBeams();
-    for (const s of this.beams) s.intensity = enabled && this.state.headlights ? 60 : 0;
+    for (const s of this.beams) s.intensity = enabled && this.state.headlights ? 55 : 0;
   }
 
   setHeadlights(on) {
     this.state.headlights = on;
-    return on;
   }
 
   toggleHeadlights() {
-    return this.setHeadlights(!this.state.headlights);
+    this.state.headlights = !this.state.headlights;
+    return this.state.headlights;
   }
 
   /** -1 left, 1 right, 0 off. */
   setIndicator(direction) {
-    if (this.state.indicator !== direction) {
-      this.blinkPhase = 0;
-      this.blinkOn = true;
-    }
+    if (this.state.indicator !== direction) this.blinkPhase = 0;
     this.state.indicator = direction;
   }
 
   /**
-   * @param {number} dt seconds
-   * @param {object} telemetry from the vehicle
+   * @param {number} dt
+   * @param {object} telemetry from VehiclePhysics
    */
   update(dt, telemetry = {}) {
     const braking = (telemetry.brake ?? 0) > 0.05 || telemetry.handbrake === true;
@@ -185,35 +230,35 @@ export class VehicleLights {
       this.blinkPhase = 0;
       this.blinkOn = !this.blinkOn;
     }
-    const indicating = this.state.indicator !== 0 && this.blinkOn;
-    const head = this.state.headlights;
-    const ease = Math.min(1, dt * 14);
+    const indicatorOn = this.state.indicator !== 0 && this.blinkOn;
+    if (!this.enabled) return;
 
-    const drive = (key, target, color = null) => {
-      const lamp = this.realLamps?.[key];
+    const head = this.state.headlights;
+    const set = (lamp, on, level = 1) => {
       if (!lamp) return;
-      const m = lamp.material;
-      m.emissiveIntensity += (target - m.emissiveIntensity) * ease;
-      if (color) m.emissive.lerp(color, ease);
-      const halo = this.glowSprites?.[key];
-      if (halo) {
-        const want = Math.min(1, target / 2.4) * 0.7;
-        halo.material.opacity += (want - halo.material.opacity) * ease;
-      }
+      const target = on ? level : 0;
+      lamp.lens.material.opacity += (target - lamp.lens.material.opacity) * Math.min(1, dt * 18);
+      lamp.halo.material.opacity += (target * 0.55 - lamp.halo.material.opacity) * Math.min(1, dt * 18);
+      if (lamp.core) lamp.core.material.opacity = lamp.lens.material.opacity;
     };
 
-    // A modern BMW flashes part of the daytime strip as the indicator, so the
-    // DRL carries both jobs: white when lit, amber while blinking.
-    drive('headlightDrl', indicating ? 3.6 : head ? 2.4 : 1.0, indicating ? AMBER : DAYLIGHT);
-    drive('headlightMain', head ? 2.8 : 0);
-    drive(
-      'tailLight',
-      braking ? 4.4 : reversing ? 2.8 : head ? 1.2 : 0.3,
-      reversing ? REVERSE_WHITE : TAIL_RED,
-    );
+    set(this.lamps.headL, head, 0.95);
+    set(this.lamps.headR, head, 0.95);
+    set(this.lamps.drlL, head, 0.8);
+    set(this.lamps.drlR, head, 0.8);
+    set(this.lamps.tailL, head || braking, braking ? 1.0 : 0.45);
+    set(this.lamps.tailR, head || braking, braking ? 1.0 : 0.45);
+    set(this.lamps.reverseL, reversing, 0.9);
+    set(this.lamps.reverseR, reversing, 0.9);
+    set(this.lamps.indFL, indicatorOn && this.state.indicator < 0, 1);
+    set(this.lamps.indRL, indicatorOn && this.state.indicator < 0, 1);
+    set(this.lamps.indFR, indicatorOn && this.state.indicator > 0, 1);
+    set(this.lamps.indRR, indicatorOn && this.state.indicator > 0, 1);
 
-    for (const m of this.modelMaterials.brake) m.emissiveIntensity = braking ? 3.4 : head ? 0.9 : 0;
-    for (const m of this.modelMaterials.indicator) m.emissiveIntensity = indicating ? 3.2 : 0;
-    for (const s of this.beams) s.intensity = head ? 60 : 0;
+    // drive the materials the GLB actually kept
+    for (const m of this.modelMaterials.brake) m.emissiveIntensity = braking ? 3.2 : head ? 0.8 : 0;
+    for (const m of this.modelMaterials.indicator) m.emissiveIntensity = indicatorOn ? 3.0 : 0;
+
+    for (const s of this.beams) s.intensity = head ? 55 : 0;
   }
 }

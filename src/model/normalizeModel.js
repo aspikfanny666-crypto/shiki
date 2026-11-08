@@ -1,9 +1,11 @@
 import { Box3, MathUtils, Vector3 } from 'three';
-import { BMW_M5_F90_REFERENCE, SCALE_TOLERANCE } from '../config.js';
-import { MATERIAL_PATTERNS } from '../vehicleConfig.js';
+import { SCALE_TOLERANCE } from '../config.js';
+import { MATERIAL_PATTERNS, VEHICLE_REFERENCE } from '../vehicleConfig.js';
 
-const MATERIAL_FRONT = MATERIAL_PATTERNS.frontMarker;
-const MATERIAL_REAR = MATERIAL_PATTERNS.rearMarker;
+// Read through getters, never into a module-level const: both bindings are
+// reassigned when the player switches car, and a const captured at import time
+// would pin the first car's figures for the life of the page.
+const reference = () => VEHICLE_REFERENCE;
 
 /**
  * Scale + orientation normalisation.
@@ -87,7 +89,7 @@ export function normalizeModel(holder, model, { forwardHint = null, forceScale =
   // ---- 4. scale -------------------------------------------------------------
   const oriented = measure(model);
   const measuredLength = oriented.size.z;
-  const ref = BMW_M5_F90_REFERENCE.length;
+  const ref = reference().length;
   let scale = 1;
 
   if (forceScale) {
@@ -122,14 +124,14 @@ export function normalizeModel(holder, model, { forwardHint = null, forceScale =
   };
   report.reference = {
     length: ref,
-    width: BMW_M5_F90_REFERENCE.widthBody,
-    widthWithMirrors: BMW_M5_F90_REFERENCE.widthMirrors,
-    height: BMW_M5_F90_REFERENCE.height,
+    width: reference().widthBody,
+    widthWithMirrors: reference().widthMirrors,
+    height: reference().height,
   };
   report.deltaPct = {
     length: +(((final.size.z - ref) / ref) * 100).toFixed(1),
-    width: +(((final.size.x - BMW_M5_F90_REFERENCE.widthBody) / BMW_M5_F90_REFERENCE.widthBody) * 100).toFixed(1),
-    height: +(((final.size.y - BMW_M5_F90_REFERENCE.height) / BMW_M5_F90_REFERENCE.height) * 100).toFixed(1),
+    width: +(((final.size.x - reference().widthBody) / reference().widthBody) * 100).toFixed(1),
+    height: +(((final.size.y - reference().height) / reference().height) * 100).toFixed(1),
   };
   report.finalBox = {
     min: final.box.min.toArray().map((v) => +v.toFixed(3)),
@@ -184,8 +186,8 @@ export function measureForwardHint(model) {
     },
     {
       method: 'bonnet/grill vs boot/brake lights (material names)',
-      front: centroidOf(MATERIAL_FRONT, { useMaterials: true }),
-      rear: centroidOf(MATERIAL_REAR, { useMaterials: true }),
+      front: centroidOf(MATERIAL_PATTERNS.frontMarker, { useMaterials: true }),
+      rear: centroidOf(MATERIAL_PATTERNS.rearMarker, { useMaterials: true }),
     },
     {
       method: 'steering wheel is forward of centre (material names)',

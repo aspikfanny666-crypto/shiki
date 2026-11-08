@@ -57,6 +57,21 @@ export class VehiclePhysics {
     this.#create();
   }
 
+  /**
+   * Take the car out of the physics world. Removing the rigid body takes its
+   * collider and the ray-cast vehicle controller with it, so swapping car
+   * leaves nothing of the old one behind to collide with.
+   */
+  dispose() {
+    this.ready = false;
+    if (this.body) {
+      this.world.removeRigidBody(this.body);
+      this.body = null;
+      this.collider = null;
+      this.vehicle = null;
+    }
+  }
+
   /** Chassis cuboid + wheels, all derived from the measured visual. */
   #create() {
     const { RAPIER, world, visual, tuning } = this;

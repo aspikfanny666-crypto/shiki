@@ -1,4 +1,4 @@
-# BMW M5 F90 — browser driving simulator
+# BMW M5 F90 / M4 CS — browser driving simulator
 
 A Three.js + Rapier 3D driving simulator built around a real BMW M5 CS (F90)
 glTF model. `npm run dev`, then open http://localhost:5173.
@@ -63,11 +63,66 @@ the road, and pull back further on a portrait phone screen.
 
 ## Settings
 
-The ⚙ panel (persisted in `localStorage`): graphics quality (low / medium /
-high), shadows, reflections, headlight beams, camera follow sensitivity,
+The ⚙ panel (persisted in `localStorage`): the car, graphics quality (low /
+medium / high), shadows, reflections, headlight beams, camera follow sensitivity,
 steering sensitivity, touch layout (pedals left or right), touch steering
 (wheel or arrows), debug panel, plus install-as-an-app, reset-car,
 restore-defaults and the model attribution.
+
+## The two cars
+
+| | BMW M5 CS (F90) | 2025 BMW M4 CS VR46 Edition |
+|---|---|---|
+| engine | S63 4.4 twin-turbo **cross-plane V8**, 635 hp / 750 Nm | S58 3.0 twin-turbo **inline six**, 550 hp / 650 Nm |
+| mass | 1825 kg | 1760 kg |
+| drive | M xDrive | M xDrive |
+| model | 305,984 tris, 144 meshes, **no textures at all** | 166,313 tris, 48 meshes, **full PBR set** |
+| measured | 4.966 × 1.43 m, wheelbase 2.963 | 4.794 × 1.391 m, wheelbase 2.858 |
+
+Switching is a setting (⚙ → Car), not a page reload. `swapCar()` in `main.js`
+takes the old chassis out of the Rapier world, disposes its geometries,
+materials and textures, loads the new GLB, rebuilds the physics and re-points
+the camera. The **AudioContext is deliberately kept**: it is already unlocked,
+and making the player tap for sound again after changing car would be a poor
+trade for a spectrum that can be swapped in place.
+
+Everything that differs lives in `src/cars.js`; `src/vehicleConfig.js` holds
+whichever is selected and re-exports it as **live bindings**, so the rest of
+the code still imports `VEHICLE_TUNING` / `MATERIAL_PATTERNS` as before. Read
+those inside functions, never into a module-level `const` at import time, or
+you capture the first car for the life of the page.
+
+### Why they sound different
+
+Not a filter setting — the firing pattern. A cross-plane V8 fires four times
+per cycle, so engine order 4 dominates, and because the two banks fire
+unevenly there is real energy on the **half orders**. That half-order content
+*is* the V8 burble. An inline six fires three times per revolution, perfectly
+evenly: order 3 dominates and the odd harmonics all but vanish, which is why a
+straight six howls instead of burbling. `SPECTRA` in `src/audio/EngineAudio.js`
+holds one cruise/load pair per layout, and `setEngine()` rebuilds the two
+periodic waves and hands them to the running oscillators.
+
+### Why the M4's materials are left alone
+
+The M5 came through Sketchfab's `materialmerger`, which threw away every
+texture and left 89 flat colours — it *needs* the material pass (clearcoat on
+the paint, matte rubber, polished rims) and a generated tyre tread or it reads
+like a clay model. The M4 keeps base-colour, metallic-roughness, normal and
+emissive maps, real transmission glass and clearcoat on the spoiler.
+Restyling that would destroy work that is already correct, so for this car the
+material pass is off (`restyleMaterials: false`), no tread is painted, and its
+head and tail lights are left exactly as the author baked them
+(`lightLayer: false` — `VehicleLights` keeps its state and the HUD lamp, it
+just draws nothing of its own).
+
+One exception, and it is a performance one, not a style one: refracting glass
+(`KHR_materials_transmission`) makes three.js render the whole scene a second
+time into a transmission target every frame. Measured, that was about a
+quarter of the frame on its own. So it follows the quality setting like
+everything else of that cost — refraction on `high`, ordinary alpha-blended
+glass below it, with the authored values kept on the material so switching
+back restores them exactly.
 
 ## Measured behaviour
 
@@ -235,8 +290,8 @@ setup: **Settings → Pages → Source: GitHub Actions**.
 
 | | |
 |---|---|
-| draw calls | ~218 at medium (car 151 meshes + city + environment + shadow pass) |
-| triangles per frame | ~350k at medium (car is 306k; the whole city adds ~30k) |
+| draw calls | ~224 at medium with the M5, ~174 with the M4 (car + city + environment + shadow pass) |
+| triangles per frame | ~350k at medium with the M5 (car is 306k), ~390k with the M4 (car is 166k, but its glass costs a transmission pass at `high`) |
 | shadows | one blob contact shadow always; the sun shadow casts from a **box proxy** at low/medium (12 triangles) and from the 47 large panels at high |
 | pixel ratio | capped at 1.0 / 1.5 / 2.0 by quality preset |
 | textures | none in the model; asphalt, markings, streets and every facade are generated canvases |
@@ -270,13 +325,18 @@ instead of being fetched:
 
 ```bash
 npm run build
-node -e "const b=require('fs').readFileSync('public/models/bmw-f90.glb').toString('base64');
-         require('fs').writeFileSync('model.js', 'window.__BMW_MODEL__=\"'+b+'\";')"
+node scripts/build-artifact.mjs out/
 ```
 
-Then load `model.js` before the bundle. `main.js` picks the global up, turns it
-into a `blob:` URL and hands that to the loader — the same code path as a
-fetched file.
+That writes `index.html` (CSS inlined), `app.js`, and one script per car with
+its GLB as base64 in that car's embed global. `main.js` picks the global up,
+turns it into a `blob:` URL and hands that to the loader — the same code path
+as a fetched file.
+
+Only the default car is a `<script>` in the page. The others are listed in
+`window.__BMW_EMBED_SCRIPTS__` and injected the first time somebody actually
+switches to one, so opening the page costs one model, not twenty megabytes of
+them.
 
 If WebAssembly is refused by the host's Content-Security-Policy (no
 `wasm-unsafe-eval`), Rapier cannot start; the page then runs `KinematicVehicle`
@@ -285,6 +345,13 @@ with no collisions or suspension travel — and the HUD says so.
 
 ## Model attribution
 
-"BMW M5 CS (F90)" by **fvrenbld**, licensed **CC BY 4.0** —
-https://sketchfab.com/3d-models/bmw-m5-cs-f90-8f74fb3420e24213aaeea33dc99450a3
-See `public/models/README.md` for what the file contains and how it is processed.
+Both models are **CC BY 4.0**, and the credit for whichever car is loaded is
+shown in ⚙ → About.
+
+* "BMW M5 CS (F90)" by **fvrenbld** —
+  https://sketchfab.com/3d-models/bmw-m5-cs-f90-8f74fb3420e24213aaeea33dc99450a3
+* "2025 BMW M4 CS VR46 Edition" by **BMW'S Lost Proxy** —
+  https://sketchfab.com/3d-models/2025-bmw-m4-cs-vr46-edition-3d111a7ed0f544bc9215e3038db4c8dc
+
+See `public/models/README.md` for what each file contains and how it was
+processed.
