@@ -99,6 +99,19 @@ canvas { display: block; }
 [data-lamp-lights].on { background: #d7e6ff; border-color: #d7e6ff; }
 [data-lamp-air].on { background: var(--accent); border-color: var(--accent); }
 
+.hud-recovery { margin-top: 8px; }
+.hud-recovery[hidden] { display: none; }
+.hud-recovery label { color: var(--dim); letter-spacing: 0.12em; font-size: 8px; }
+.hud-recovery .bar { background: #161c24; border-radius: 2px; height: 4px; overflow: hidden; }
+.hud-recovery .bar i {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: #7c8795;
+  transition: width 90ms linear, background 0.12s;
+}
+.hud-recovery .bar i.ready { background: var(--accent); }
+
 .hud-foot { display: flex; justify-content: space-between; margin-top: 8px; font-size: 9px; color: var(--dim); }
 .hud-notice {
   margin-top: 8px;
@@ -258,8 +271,12 @@ code { color: var(--accent); }
 }
 .touch-pad.mirrored { flex-direction: row-reverse; }
 .touch-left, .touch-right { pointer-events: auto; display: flex; flex-direction: column; gap: 8px; }
-.touch-right { align-items: flex-end; }
-.touch-row { display: flex; gap: 8px; align-items: flex-end; }
+/* the right column may shrink, so a fifth button wraps instead of running off
+   the screen edge on a 360 px phone */
+.touch-left { flex: 0 0 auto; }
+.touch-right { align-items: flex-end; flex: 0 1 auto; min-width: 0; }
+.touch-row { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; justify-content: flex-end; }
+.touch-row.pedals { flex-wrap: nowrap; }
 .touch-row.pedals { align-items: stretch; gap: 10px; }
 .touch-stack { display: flex; flex-direction: column; justify-content: flex-end; gap: 8px; }
 
@@ -293,6 +310,15 @@ code { color: var(--accent); }
 .touch-btn.wide { width: 82px; height: 68px; font-size: 18px; }
 .touch-btn.active { filter: brightness(1.8); transform: scale(0.95); }
 .touch-btn.latched { border-color: var(--warn); color: var(--warn); background: rgba(251, 191, 36, 0.16); }
+.touch-btn.jump[hidden] { display: none; }
+.touch-btn.jump {
+  color: var(--accent);
+  border-color: rgba(98, 200, 255, 0.4);
+  background: rgba(98, 200, 255, 0.1);
+  opacity: 0.55;
+}
+/* only lit while there is charge for a jump, so the pad tells the truth */
+.touch-btn.jump.ready { opacity: 1; border-color: var(--accent); background: rgba(98, 200, 255, 0.22); }
 
 /* ---- pedals ---- */
 .pedal {

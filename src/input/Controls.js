@@ -5,6 +5,7 @@
  *   W / ↑            throttle              S / ↓   brake (reverse once stopped)
  *   A / ← , D / →    steer                 Space   handbrake
  *   R reset   C camera   L lights   Z / X indicators   M mute
+ *   F Recovery Mode   J jump (while Recovery Mode is on)
  *
  * Touch:
  *   - a wheel you turn with a finger, analogue and self-centring;
@@ -23,7 +24,7 @@ const THROTTLE_RAMP_MS = 170;
 const BRAKE_RAMP_MS = 110;
 
 export class Controls {
-  constructor(container, { settings, onReset, onCamera, onLights, onIndicator, onReverse, onMute, onSound } = {}) {
+  constructor(container, { settings, onReset, onCamera, onLights, onIndicator, onReverse, onMute, onSound, onRecovery, onJump } = {}) {
     this.settings = settings;
     this.state = { throttle: 0, brake: 0, steer: 0, handbrake: false };
     this.keys = new Set();
@@ -33,7 +34,7 @@ export class Controls {
     this.wheel = { angle: 0, grabbed: false, pointerId: null, lastAngle: 0 };
     this.lastSampleAt = performance.now();
     this.reverseLatch = false;
-    this.callbacks = { onReset, onCamera, onLights, onIndicator, onReverse, onMute, onSound };
+    this.callbacks = { onReset, onCamera, onLights, onIndicator, onReverse, onMute, onSound, onRecovery, onJump };
     this.isTouch = matchMedia('(hover: none), (pointer: coarse)').matches || navigator.maxTouchPoints > 0;
 
     this.#bindKeyboard();
@@ -61,6 +62,8 @@ export class Controls {
         case 'KeyZ': this.callbacks.onIndicator?.(-1); break;
         case 'KeyX': this.callbacks.onIndicator?.(1); break;
         case 'KeyM': this.callbacks.onMute?.(); break;
+        case 'KeyF': this.callbacks.onRecovery?.(); break;
+        case 'KeyJ': this.callbacks.onJump?.(); break;
         default: break;
       }
     });
@@ -119,9 +122,11 @@ export class Controls {
           <button class="touch-btn mini" data-tap="reset" aria-label="Reset car">RESET</button>
           <button class="touch-btn mini" data-tap="lights" aria-label="Lights">LIGHT</button>
           <button class="touch-btn mini" data-tap="sound" aria-label="Sound">SND</button>
+          <button class="touch-btn mini" data-tap="recovery" aria-label="Recovery Mode">REC</button>
         </div>
         <div class="touch-row pedals">
           <div class="touch-stack">
+            <button class="touch-btn mini jump" data-tap="jump" aria-label="Jump" hidden>JUMP</button>
             <button class="touch-btn mini" data-toggle="reverse" aria-label="Reverse gear">R</button>
             <button class="touch-btn mini" data-hold="handbrake" aria-label="Handbrake">P</button>
           </div>
@@ -193,6 +198,8 @@ export class Controls {
         if (action === 'reset') this.callbacks.onReset?.();
         if (action === 'lights') this.callbacks.onLights?.();
         if (action === 'sound') this.callbacks.onSound?.();
+        if (action === 'recovery') this.callbacks.onRecovery?.();
+        if (action === 'jump') this.callbacks.onJump?.();
       });
       const off = () => btn.classList.remove('active');
       btn.addEventListener('pointerup', off);
@@ -263,6 +270,19 @@ export class Controls {
   // ----------------------------------------------------------------- state ---
   setSoundState(on) {
     this.pad?.querySelector('[data-tap="sound"]')?.classList.toggle('latched', Boolean(on));
+  }
+
+  /**
+   * Recovery Mode owns two bits of the pad: REC latches, and the JUMP button
+   * only exists while the mode is on — an always-visible button for something
+   * that is off would be a lie, and the pad has no room to spare on a phone.
+   */
+  setRecoveryState({ active = false, canJump = false } = {}) {
+    this.pad?.querySelector('[data-tap="recovery"]')?.classList.toggle('latched', active);
+    const jump = this.pad?.querySelector('[data-tap="jump"]');
+    if (!jump) return;
+    jump.hidden = !active;
+    jump.classList.toggle('ready', active && canJump);
   }
 
   setReverseLatch(on) {

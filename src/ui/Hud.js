@@ -32,6 +32,11 @@ export class Hud {
         <span class="lamp" data-lamp-tc>TC</span>
         <span class="lamp" data-lamp-lights>LIGHTS</span>
         <span class="lamp" data-lamp-air>AIR</span>
+        <span class="lamp" data-lamp-rec>REC</span>
+      </div>
+      <div class="hud-recovery" data-recovery hidden>
+        <label>RECOVERY</label>
+        <div class="bar"><i data-recovery-fill></i></div>
       </div>
       <div class="hud-foot"><span data-cam>chase</span><span data-audio>snd —</span><span data-fps>60 fps</span></div>
       <div class="hud-notice" data-notice hidden></div>
@@ -52,6 +57,7 @@ export class Hud {
       tc: q('[data-lamp-tc]'),
       lights: q('[data-lamp-lights]'),
       air: q('[data-lamp-air]'),
+      rec: q('[data-lamp-rec]'),
       cam: q('[data-cam]'),
       audio: q('[data-audio]'),
       fps: q('[data-fps]'),
@@ -85,15 +91,48 @@ export class Hud {
   }
 
   /** One-line banner under the HUD (used when physics runs in fallback mode). */
-  setNotice(text) {
+  /**
+   * @param {string} text
+   * @param {number} [seconds] clear itself after this long. A banner that
+   *   explains a mode you just turned on is worth a few seconds and no more;
+   *   left up, it is just something covering the road.
+   */
+  setNotice(text, seconds = 0) {
+    clearTimeout(this._noticeTimer);
     this.refs.notice.textContent = text ?? '';
     this.refs.notice.hidden = !text;
+    if (text && seconds > 0) {
+      this._noticeTimer = setTimeout(() => {
+        this.refs.notice.textContent = '';
+        this.refs.notice.hidden = true;
+      }, seconds * 1000);
+    }
   }
 
   #text(ref, value) {
     if (this._last[ref] === value) return;
     this._last[ref] = value;
     this.refs[ref].textContent = value;
+  }
+
+  /** The recovery charge meter only exists while the mode is on. */
+  #recovery(status) {
+    const row = this.el.querySelector('[data-recovery]');
+    if (!row) return;
+    const show = Boolean(status?.active);
+    if (this._last.recShown !== show) {
+      this._last.recShown = show;
+      row.hidden = !show;
+    }
+    if (!show) return;
+    const pct = Math.round((status.charge ?? 0) * 100);
+    if (this._last.recPct === pct) return;
+    this._last.recPct = pct;
+    const fill = this.el.querySelector('[data-recovery-fill]');
+    if (fill) {
+      fill.style.width = `${pct}%`;
+      fill.classList.toggle('ready', Boolean(status.canJump));
+    }
   }
 
   #lamp(ref, on, cls = 'on') {
@@ -107,7 +146,7 @@ export class Hud {
    * @param {object} t   VehiclePhysics telemetry
    * @param {object} ui  { fps, camera, headlights, redlineRpm }
    */
-  update(t, { fps = 60, camera = 'chase', headlights = false, redlineRpm = 7200, soundBlocked = false, soundLabel, audioState = 'off' } = {}) {
+  update(t, { fps = 60, camera = 'chase', headlights = false, redlineRpm = 7200, soundBlocked = false, soundLabel, audioState = 'off', recovery = null } = {}) {
     this.setSoundPrompt(soundBlocked, soundLabel);
     this.#text('audio', `snd ${audioState}`);
     const speed = Math.abs(Math.round(t.speedKmh ?? 0));
@@ -149,6 +188,8 @@ export class Hud {
     this.#lamp('tc', Boolean(t.tractionLoss));
     this.#lamp('lights', headlights);
     this.#lamp('air', (t.wheelsOnGround ?? 4) < 4);
+    this.#lamp('rec', Boolean(recovery?.active));
+    this.#recovery(recovery);
 
     this.#text('cam', camera);
     this.#text('fps', `${Math.round(fps)} fps`);

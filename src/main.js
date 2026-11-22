@@ -11,6 +11,7 @@ import { VehiclePhysics } from './vehicle/VehiclePhysics.js';
 import { KinematicVehicle } from './vehicle/KinematicVehicle.js';
 import { NullPhysicsWorld } from './scene/NullPhysicsWorld.js';
 import { VehicleLights } from './vehicle/VehicleLights.js';
+import { RecoveryMode } from './vehicle/RecoveryMode.js';
 import { Controls } from './input/Controls.js';
 import { EngineAudio } from './audio/EngineAudio.js';
 import { reportToConsole, buildReportJSON } from './model/reportToConsole.js';
@@ -154,6 +155,7 @@ const buildPhysics = () => (rapierReady
 
 let physics = buildPhysics();
 let lights = new VehicleLights(visual, { settings });
+const recovery = new RecoveryMode(physics);
 const audio = new EngineAudio({ settings, engine: car.tuning.engine });
 const SPAWN = new Vector3(0, rapierReady ? 0.08 : 0, 0);
 physics.reset(SPAWN);
@@ -225,6 +227,13 @@ const controls = new Controls(container, {
     if (next) audio.resume();
   },
   onReverse: (on) => physics.requestReverse(on),
+  onRecovery: () => {
+    const on = recovery.toggle();
+    hud.setNotice(recovery.supported
+      ? (on ? 'recovery mode on — JUMP, hold gas to rock, steer to right it' : '')
+      : 'recovery mode needs WebAssembly physics', 5);
+  },
+  onJump: () => recovery.jump(),
 });
 
 // Offline support + the "add to home screen" affordance. Registration is a
@@ -279,6 +288,7 @@ async function swapCar(id) {
     scene.add(visual.root);
     physics = buildPhysics();
     physics.steeringSensitivity = settings.get('steeringSensitivity');
+    recovery.attach(physics);
     lights = new VehicleLights(visual, { settings });
     lights.setBeamsEnabled(settings.get('headlightBeams'));
     visual.setShadows(settings.get('shadows'), settings.get('quality'));
@@ -346,6 +356,7 @@ renderer.setAnimationLoop(() => {
 
   const t = physics.telemetry;
 
+  recovery.update(dt, input, t);
   lights.update(dt, t);
   audio.update(dt, t);
   // the city answers the headlight switch: windows and street lamps come up
@@ -367,6 +378,8 @@ renderer.setAnimationLoop(() => {
   const wantSound = settings.get('sound');
   const soundOn = wantSound && audio.running && !audioPolicyBlocked;
   controls.setSoundState(soundOn);
+  const recoveryStatus = recovery.status;
+  controls.setRecoveryState(recoveryStatus);
   hud.update(t, {
     fps,
     camera: rig.mode,
@@ -374,6 +387,7 @@ renderer.setAnimationLoop(() => {
     soundBlocked: wantSound && !soundOn,
     soundLabel: audioPolicyBlocked ? '🔊 OPEN IN A TAB FOR SOUND' : '🔊 TAP FOR SOUND',
     audioState: !wantSound ? 'off' : audioPolicyBlocked ? 'blocked by host' : audio.running ? 'on' : audio.started ? 'blocked' : 'tap',
+    recovery: recoveryStatus,
   });
 });
 
@@ -388,6 +402,7 @@ window.__BMW__ = {
   get car() { return car; },
   get report() { return buildReportJSON(visual); },
   swapCar,
+  recovery,
   physicsWorld, environment, controls, settings,
   scene, camera, rig, hud, renderer, RAPIER, rapierReady, audio,
   dumpHierarchy: () => console.log(window.__BMW__.report.tree),

@@ -16,6 +16,8 @@ glTF model. `npm run dev`, then open http://localhost:5173.
 | `A` `D` / `←` `→` | steer |
 | `Space` | handbrake (locks the rear axle) |
 | `R` | reset the car |
+| `F` | Recovery Mode on/off |
+| `J` | jump (only while Recovery Mode is on) |
 | `C` | camera: chase → close → hood → cockpit → free |
 | `L` | headlights (also brings up the city's windows and street lamps) |
 | `Z` / `X` | left / right indicator |
@@ -31,7 +33,10 @@ On touch devices an on-screen pad appears automatically:
   110 ms to full brake — so a tap is a blip and a hold is full travel, and the
   fill inside each pedal shows how far in it is.
 * a latching **R** for reverse (with the pedals swapped so GAS drives
-  backwards), handbrake **P**, plus CAM, RESET, LIGHT and SND.
+  backwards), handbrake **P**, plus CAM, RESET, LIGHT, SND and **REC**.
+* a **JUMP** button that only exists while Recovery Mode is on, and only lights
+  up when there is charge for a jump — a button for something that is off, or
+  that will not fire, would be a lie, and the pad has no room to spare.
 
 Settings → Controls switches the wheel back to the old left/right arrows
 (**Touch steering: Wheel | Arrows**) and moves the pedals to the left thumb
@@ -123,6 +128,59 @@ quarter of the frame on its own. So it follows the quality setting like
 everything else of that cost — refraction on `high`, ordinary alpha-blended
 glass below it, with the authored values kept on the material so switching
 back restores them exactly.
+
+## Recovery Mode — «Высвобождение» / «Раскачка»
+
+Every driving game eventually needs an answer to *the car is on its roof in a
+ditch and there is nothing I can do*. Reset-to-spawn (`R`) is one answer, and a
+blunt one: it throws away where you were. Recovery Mode is the other — a small,
+bounded set of abilities that let you work the car free yourself.
+
+`F`, or the **REC** button, toggles it. While it is on:
+
+| | |
+|---|---|
+| **JUMP** (`J` / the JUMP button) | a vertical impulse. Clears a kerb, hops out of a rut — and on the roof it becomes a *recovery flip*. |
+| **ROCK** (hold GAS or BRAKE below 11 km/h) | pulses the chassis fore and aft, the way you rock a car out of snow. |
+| **RIGHT** (steer while airborne or flipped) | steering becomes roll, so you can aim the landing. |
+
+Everything is applied to the chassis rigid body. No teleports, no constraint
+fiddling: collisions, suspension and the ray-cast vehicle keep behaving exactly
+as they do the rest of the time.
+
+**The jump is derived, not tuned by feel.** For a height `h`, `v = sqrt(2gh)`
+and the impulse is `m·v` — 8,669 N·s for the M5 at 1.15 m. Measured in the
+deterministic run: the car rises **1.139 m**, and nothing rotates it
+(`minUp` stays at 1.0).
+
+**It is bounded.** A jump costs half a charge meter that refills at 0.32/s, so
+roughly one jump per 1.6 s sustained, two back to back after a quiet moment.
+The HUD shows the meter and the REC lamp. Without that, "jump" is just a flying
+car.
+
+**Air control is a target rate, not a torque** — and that is a correction, not
+a preference. The first version applied roll torque while the steering was
+held. It did flip the car, and then kept going: measured, the car passed
+upright at 0.67 s with 7.9 rad/s still on it and tumbled straight back onto its
+roof. Unbounded torque cannot be aimed. So the roll and yaw *components* of the
+angular velocity are steered towards a rate the player asks for (3.0 and
+1.4 rad/s, approached at 14 rad/s²), and everything perpendicular to those axes
+is left exactly as the physics made it.
+
+**The recovery flip** is the same idea taken to its conclusion. A jump taken on
+the roof puts the car in the air for `t = 2·sqrt(2h/g)` = 0.97 s, so the roll
+rate that turns it exactly half a turn in that time is `π/t` = 3.24 rad/s, set
+directly. Which way to roll is measured, not guessed: the direction that
+carries the car's own up vector towards world up. When it is *exactly* upside
+down that cross product vanishes and either way is as good, so the player's
+steering breaks the tie, and failing that it rolls right.
+
+Verified from 180°, 150° and −170° of roll, with and without steering held:
+every case ends upright, in three or four flips. A plain jump on the wheels is
+still a plain jump.
+
+Recovery Mode needs a real rigid body, so it reports itself **unavailable**
+under the no-WebAssembly `KinematicVehicle` fallback rather than pretending.
 
 ## Measured behaviour
 
