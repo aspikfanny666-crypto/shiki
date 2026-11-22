@@ -149,6 +149,23 @@ const M5_TUNING = Object.freeze({
   drivenAxle: 'all',
 });
 
+/**
+ * Which material name means "paint", "glass", "rubber"… is a property of the
+ * model, not of the renderer. The M5's panels are `bodyshell`; the GLS's are
+ * `gls_paint`. A car with no textures needs these, because its whole look is
+ * rebuilt from them; a car that ships PBR maps never reaches this code.
+ */
+const M5_RESTYLE = Object.freeze({
+  paint: /^(bodyshell|doorcolor|bonnet\d*|boot\d*|chassis00[1289]|doordsidef|doorpsidef)/i,
+  glass: /glass|window/i,
+  rubber: /tires|tyre/i,
+  chrome: /chrome|mesheswhite|hub/i,
+  rotor: /rotor/i,
+  caliper: /crimson|caliper/i,
+  interior: /interior|seats|dash|steeringwheel|seatbelt|misca|miscb|miscdoor/i,
+  dark: /black|misc|part\d/i,
+});
+
 // ---------------------------------------------------------------- M4 CS ---
 
 /** Real BMW M4 CS (G82, 2025) figures. */
@@ -261,6 +278,151 @@ const M4_TUNING = Object.freeze({
   drivenAxle: 'all',
 });
 
+
+// -------------------------------------------------------------- GLS 600 ---
+
+/** Real Mercedes-Maybach GLS 600 4MATIC figures. */
+const GLS_REFERENCE = Object.freeze({
+  length: 5.205,
+  widthBody: 1.956, // without mirrors
+  widthMirrors: 2.157,
+  height: 1.840,
+  wheelbase: 3.135,
+  trackFront: 1.679,
+  trackRear: 1.692,
+  wheelDiameterFront: 0.808, // 275/50 R21
+  wheelDiameterRear: 0.808,
+  wheelWidthFront: 0.275,
+  wheelWidthRear: 0.315,
+  kerbMass: 2785,
+});
+
+/**
+ * This export kept the names from the BeamNG asset it was built from, which is
+ * a gift: `gls_fara` is the headlight, `gls_stop` the brake light, `gls_sigl`
+ * and `gls_sigr` the indicators, `gls_torpedka` the dashboard. (Several are
+ * Russian — фара, свет, торпедка — which is exactly why this detector reads
+ * material names rather than guessing from English words alone.)
+ *
+ * `wheel_42a` is the rim and `wheel_42b` the tyre, per the BeamNG convention.
+ */
+const GLS_MATERIAL_PATTERNS = Object.freeze({
+  /**
+   * The tyre is the one material the exporter did NOT name — it came through
+   * as `Scene_-_Root.001`. It was found by measurement instead: of all 43
+   * materials, it is the only one that forms four separate clusters of
+   * 0.29 × 0.81 × 0.81 m, one in each corner, which is a 275/50 R21 to the
+   * centimetre. `gls_kaki.104` is the rim inside it, at 0.64 m.
+   *
+   * `wheel_42a` / `wheel_42b`, despite the names, are spread over the whole
+   * body and are not wheels at all. Names lie; geometry does not.
+   */
+  tire: /^Scene_-_Root/i,
+  wheelPart: /(^Scene_-_Root|gls_kaki\.104|amdb11_(brake|caliper|misc))/i,
+  // `gls_amg_steer` is an 18-triangle AMG badge, not the rim: the wheel itself
+  // is welded into the cabin mesh. Spinning a floating badge would look worse
+  // than not animating anything, so this car has no turning steering wheel.
+  steeringWheel: /(?!)/,
+  dashboard: /gls_torpedka/i,
+  interior: /(gls_interior|gls_leather|gls_torpedka|gls_seatbelt|gls_wood|gls_din|gls_carbonn|etk800_interior|gls_dvd|gls_g(auges|ps)_screen)/i,
+  headlight: /(gls_fara|gls_ras|gls_run|gls_svet)/i,
+  brakeLight: /(gls_stop|gls_rear)/i,
+  turnSignal: /(gls_sigl|gls_sigr|lsiggls)/i,
+  body: /(gls_paint|gls_kaki|vehicle_paint|gls_black_chrome)/i,
+  glass: /(gls_glass|etk800_glass|vehicle_vehglass)/i,
+  frontMarker: /(gls_fara|gls_grille|gls_run|gls_ras)/i,
+  rearMarker: /(gls_stop|gls_rear|gls_sig)/i,
+});
+
+const GLS_RESTYLE = Object.freeze({
+  paint: /^(gls_paint|gls_kaki\.025|vehicle_paint)/i,
+  glass: /glass/i,
+  rubber: /^Scene_-_Root/i,
+  chrome: /(gls_kaki\.104|black_chrome|chrome|amdb11_misc)/i,
+  rotor: /amdb11_brake/i,
+  caliper: /amdb11_caliper/i,
+  interior: /(gls_interior|gls_leather|gls_torpedka|gls_seatbelt|gls_wood|gls_din|gls_carbonn|etk800_interior)/i,
+  dark: /(black|misc|vehicle_basic|vehicle_detail)/i,
+});
+
+const GLS_TUNING = Object.freeze({
+  mass: 2785,
+  // a tall body: the collider is deeper and sits higher than either M car
+  chassisInset: { width: 0.92, height: 0.62, length: 0.96 },
+  centreOfMassOffset: [0, -0.26, 0.02],
+
+  suspension: {
+    /**
+     * AIRMATIC with E-ACTIVE BODY CONTROL. Long travel and soft springs for
+     * 2785 kg — and that travel is what Recovery Mode works with: see
+     * `recoveryAssist` below and src/vehicle/RecoveryMode.js.
+     */
+    restLength: 0.38,
+    maxTravel: 0.26,
+    stiffness: 78,
+    compression: 2.2,
+    relaxation: 2.8,
+    maxForce: 52000,
+  },
+
+  tyre: {
+    // a road SUV tyre carrying far more mass: less grip than an M car
+    frictionSlip: 1.18,
+    sideFrictionStiffness: 0.85,
+    rollingResistance: 0.019,
+  },
+
+  engine: {
+    // M177 4.0 V8 biturbo + EQ Boost: 558 hp (410 kW), 730 Nm. Cross-plane.
+    peakTorqueNm: 730,
+    idleRpm: 700,
+    redlineRpm: 6000,
+    maxRpm: 6400,
+    inertia: 0.42,
+    brakingTorqueNm: 70,
+    cylinders: 8,
+    layout: 'v8-crossplane',
+  },
+
+  transmission: {
+    // 9G-TRONIC
+    gearRatios: [5.35, 3.24, 2.25, 1.64, 1.21, 1.0, 0.87, 0.72, 0.60],
+    reverseRatio: 4.8,
+    finalDrive: 3.07,
+    efficiency: 0.9,
+    upshiftRpm: 5700,
+    downshiftRpm: 2200,
+    maxReverseKmh: 35,
+    shiftTime: 0.26,
+  },
+
+  brakes: {
+    // 2.8 tonnes takes more stopping, and it leans on the front axle more
+    maxBrakeForce: 132,
+    rearBias: 0.42,
+    handbrakeForce: 300,
+  },
+
+  aero: {
+    // a big square SUV: much more frontal area, worse drag, no downforce
+    dragCoefficient: 0.37,
+    frontalArea: 2.95,
+    airDensity: 1.225,
+    downforceCoefficient: 0.02,
+  },
+
+  steering: {
+    maxAngleDeg: 36,
+    minAngleDegAtSpeed: 9,
+    speedForMinAngle: 50,
+    returnRate: 2.8,
+    turnRate: 2.0,
+  },
+
+  // 4MATIC permanent all-wheel drive.
+  drivenAxle: 'all',
+});
+
 // --------------------------------------------------------------------------
 
 const NO_OVERRIDES = Object.freeze({
@@ -301,6 +463,7 @@ export const CARS = Object.freeze({
     }),
     /** the merge stripped every texture, so the renderer rebuilds the look */
     restyleMaterials: true,
+    restyle: M5_RESTYLE,
     /** and paints a tyre tread, because there is none */
     generateTyreTread: true,
     /** the lights are merged into the body: VehicleLights adds its own layer */
@@ -334,6 +497,7 @@ export const CARS = Object.freeze({
     }),
     /** full PBR set from the author; leave every material alone */
     restyleMaterials: false,
+    restyle: M5_RESTYLE, // never reached: restyleMaterials is false
     generateTyreTread: false,
     /** the head and tail lights are already lit by the model's emissive map */
     lightLayer: false,
@@ -342,6 +506,53 @@ export const CARS = Object.freeze({
       author: "BMW'S Lost Proxy (https://sketchfab.com/Bmws_Lost_Proxy)",
       license: 'CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)',
       source: 'https://sketchfab.com/3d-models/2025-bmw-m4-cs-vr46-edition-3d111a7ed0f544bc9215e3038db4c8dc',
+    }),
+  }),
+  'gls-600': Object.freeze({
+    id: 'gls-600',
+    label: 'GLS 600',
+    name: 'Mercedes-Maybach GLS 600',
+    modelUrl: 'models/mercedes-gls600.glb',
+    embedGlobal: '__GLS_MODEL__',
+    reference: GLS_REFERENCE,
+    tuning: GLS_TUNING,
+    materialPatterns: GLS_MATERIAL_PATTERNS,
+    nodeOverrides: NO_OVERRIDES,
+    wheelExtraction: Object.freeze({
+      enabled: true,
+      radiusScale: 1.04,
+      // the rim, tyre, disc and caliper are separate materials here, so the
+      // cylinder has to be wide enough to take the whole corner with it
+      widthScale: 1.5,
+      // the arches and sills reach into that cylinder; they must stay put
+      excludeMaterials: [
+        /gls_paint/i, /gls_kaki\.025/i, /vehicle_paint/i, /gls_glass/i,
+        /gls_interior/i, /gls_black_chrome/i, /wheel_42b\.038/i, /etk800\.009/i,
+      ],
+      verbose: true,
+    }),
+    /** no textures at all, same as the M5: the look is rebuilt from materials */
+    restyleMaterials: true,
+    restyle: GLS_RESTYLE,
+    /** the tyre is already 23k triangles of moulded tread; do not paint over it */
+    generateTyreTread: false,
+    /**
+     * The export kept real, separate light materials (gls_fara, gls_stop,
+     * gls_sigl/r), so VehicleLights drives those directly instead of adding a
+     * layer of its own quads on top of them.
+     */
+    lightLayer: false,
+    /**
+     * The reason this car is here. The GLS with E-ACTIVE BODY CONTROL has a
+     * free-driving assist that pumps the air suspension up and down to rock
+     * itself out of sand. See src/vehicle/RecoveryMode.js.
+     */
+    recoveryAssist: true,
+    credit: Object.freeze({
+      title: 'Mersedes- Benz Maybach GLS 600',
+      author: 'Black Snow (https://sketchfab.com/BlackSnow02)',
+      license: 'CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)',
+      source: 'https://sketchfab.com/3d-models/mersedes-benz-maybach-gls-600-34c4687ba8204efaa7551afea9f5689f',
     }),
   }),
 });

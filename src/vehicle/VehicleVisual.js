@@ -390,6 +390,11 @@ export class VehicleVisual {
       });
     };
 
+    // Which name means "paint", "glass", "rubber"… is a property of the model,
+    // not of the renderer: the M5's panels are `bodyshell`, the GLS's are
+    // `gls_paint`. Each car brings its own set; see RESTYLE in src/cars.js.
+    const R = this.car.restyle;
+
     forEachMaterial((m, mesh, list, index) => {
       if (!m || seen.has(m.uuid)) return;
       seen.set(m.uuid, true);
@@ -397,7 +402,7 @@ export class VehicleVisual {
       m.envMapIntensity = 1.0;
 
       // --- car paint: clearcoat is what makes a body panel look painted
-      if (/^(bodyshell|doorcolor|bonnet\d*|boot\d*|chassis00[1289]|doordsidef|doorpsidef)/i.test(name)) {
+      if (R.paint.test(name)) {
         const physical = new MeshPhysicalMaterial({
           name: `${name}+clearcoat`,
           color: m.color?.clone() ?? new Color(0xffffff),
@@ -415,7 +420,7 @@ export class VehicleVisual {
         return;
       }
 
-      if (/glass|window/i.test(name)) {
+      if (R.glass.test(name)) {
         m.transparent = true;
         m.opacity = Math.min(m.opacity ?? 1, 0.42);
         m.roughness = 0.05;
@@ -425,7 +430,7 @@ export class VehicleVisual {
         upgrades.push({ material: name, change: 'glass: transparent + sharp reflections' });
         return;
       }
-      if (/tires|tyre/i.test(name)) {
+      if (R.rubber.test(name)) {
         m.roughness = 0.95;
         m.metalness = 0.0;
         m.color?.multiplyScalar(0.85);
@@ -433,28 +438,28 @@ export class VehicleVisual {
         upgrades.push({ material: name, change: 'rubber: matte' });
         return;
       }
-      if (/chrome|mesheswhite|hub/i.test(name)) {
+      if (R.chrome.test(name)) {
         m.metalness = 0.95;
         m.roughness = 0.14;
         m.envMapIntensity = 1.4;
         upgrades.push({ material: name, change: 'chrome/rim: polished metal' });
         return;
       }
-      if (/rotor/i.test(name)) {
+      if (R.rotor.test(name)) {
         m.metalness = 0.85;
         m.roughness = 0.38;
         m.envMapIntensity = 1.1;
         upgrades.push({ material: name, change: 'brake disc: brushed metal' });
         return;
       }
-      if (/crimson|caliper/i.test(name)) {
+      if (R.caliper.test(name)) {
         m.metalness = 0.25;
         m.roughness = 0.35;
         m.envMapIntensity = 0.9;
         upgrades.push({ material: name, change: 'brake caliper: semi-gloss' });
         return;
       }
-      if (/interior|seats|dash|steeringwheel|seatbelt|misca|miscb|miscdoor/i.test(name)) {
+      if (R.interior.test(name)) {
         m.roughness = Math.max(m.roughness ?? 0.5, 0.68);
         m.metalness = Math.min(m.metalness ?? 0, 0.1);
         m.envMapIntensity = 0.45;
@@ -472,7 +477,7 @@ export class VehicleVisual {
         upgrades.push({ material: name, change: note });
         return;
       }
-      if (/black|misc|part\d/i.test(name)) {
+      if (R.dark.test(name)) {
         m.roughness = Math.max(m.roughness ?? 0.5, 0.55);
         m.envMapIntensity = 0.7;
       }

@@ -155,7 +155,7 @@ const buildPhysics = () => (rapierReady
 
 let physics = buildPhysics();
 let lights = new VehicleLights(visual, { settings });
-const recovery = new RecoveryMode(physics);
+const recovery = new RecoveryMode(physics, car);
 const audio = new EngineAudio({ settings, engine: car.tuning.engine });
 const SPAWN = new Vector3(0, rapierReady ? 0.08 : 0, 0);
 physics.reset(SPAWN);
@@ -228,12 +228,13 @@ const controls = new Controls(container, {
   },
   onReverse: (on) => physics.requestReverse(on),
   onRecovery: () => {
+    if (!recovery.supported) {
+      hud.setNotice('this car has no free-driving assist — try the GLS 600', 5);
+      return;
+    }
     const on = recovery.toggle();
-    hud.setNotice(recovery.supported
-      ? (on ? 'recovery mode on — JUMP, hold gas to rock, steer to right it' : '')
-      : 'recovery mode needs WebAssembly physics', 5);
+    hud.setNotice(on ? 'free-driving assist — give it throttle while it rocks' : '', 5);
   },
-  onJump: () => recovery.jump(),
 });
 
 // Offline support + the "add to home screen" affordance. Registration is a
@@ -288,7 +289,7 @@ async function swapCar(id) {
     scene.add(visual.root);
     physics = buildPhysics();
     physics.steeringSensitivity = settings.get('steeringSensitivity');
-    recovery.attach(physics);
+    recovery.attach(physics, car);
     lights = new VehicleLights(visual, { settings });
     lights.setBeamsEnabled(settings.get('headlightBeams'));
     visual.setShadows(settings.get('shadows'), settings.get('quality'));

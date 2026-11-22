@@ -35,7 +35,7 @@ export class Hud {
         <span class="lamp" data-lamp-rec>REC</span>
       </div>
       <div class="hud-recovery" data-recovery hidden>
-        <label>RECOVERY</label>
+        <label>FREE-DRIVING ASSIST</label>
         <div class="bar"><i data-recovery-fill></i></div>
       </div>
       <div class="hud-foot"><span data-cam>chase</span><span data-audio>snd —</span><span data-fps>60 fps</span></div>
@@ -115,7 +115,7 @@ export class Hud {
     this.refs[ref].textContent = value;
   }
 
-  /** The recovery charge meter only exists while the mode is on. */
+  /** The assist's countdown only exists while it is running. */
   #recovery(status) {
     const row = this.el.querySelector('[data-recovery]');
     if (!row) return;
@@ -125,13 +125,14 @@ export class Hud {
       row.hidden = !show;
     }
     if (!show) return;
-    const pct = Math.round((status.charge ?? 0) * 100);
+    const pct = Math.round((status.remaining ?? 0) * 100);
     if (this._last.recPct === pct) return;
     this._last.recPct = pct;
     const fill = this.el.querySelector('[data-recovery-fill]');
     if (fill) {
       fill.style.width = `${pct}%`;
-      fill.classList.toggle('ready', Boolean(status.canJump));
+      // lit on the lift, dim on the drop, so the bar shows the car pumping
+      fill.classList.toggle('ready', (status.lift ?? 0) > 0);
     }
   }
 

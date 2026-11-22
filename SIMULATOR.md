@@ -1,4 +1,4 @@
-# BMW M5 F90 / M4 CS — browser driving simulator
+# BMW M5 F90 / M4 CS / Maybach GLS 600 — browser driving simulator
 
 A Three.js + Rapier 3D driving simulator built around a real BMW M5 CS (F90)
 glTF model. `npm run dev`, then open http://localhost:5173.
@@ -16,8 +16,7 @@ glTF model. `npm run dev`, then open http://localhost:5173.
 | `A` `D` / `←` `→` | steer |
 | `Space` | handbrake (locks the rear axle) |
 | `R` | reset the car |
-| `F` | Recovery Mode on/off |
-| `J` | jump (only while Recovery Mode is on) |
+| `F` | Recovery Mode — only on a car that has one (the GLS 600) |
 | `C` | camera: chase → close → hood → cockpit → free |
 | `L` | headlights (also brings up the city's windows and street lamps) |
 | `Z` / `X` | left / right indicator |
@@ -33,10 +32,10 @@ On touch devices an on-screen pad appears automatically:
   110 ms to full brake — so a tap is a blip and a hold is full travel, and the
   fill inside each pedal shows how far in it is.
 * a latching **R** for reverse (with the pedals swapped so GAS drives
-  backwards), handbrake **P**, plus CAM, RESET, LIGHT, SND and **REC**.
-* a **JUMP** button that only exists while Recovery Mode is on, and only lights
-  up when there is charge for a jump — a button for something that is off, or
-  that will not fire, would be a lie, and the pad has no room to spare.
+  backwards), handbrake **P**, plus CAM, RESET, LIGHT and SND.
+* **REC**, which appears only on a car that actually has a free-driving assist.
+  A button for something the car cannot do would be a lie, and the pad has no
+  room to spare on a phone.
 
 Settings → Controls switches the wheel back to the old left/right arrows
 (**Touch steering: Wheel | Arrows**) and moves the pedals to the left thumb
@@ -74,15 +73,17 @@ steering sensitivity, touch layout (pedals left or right), touch steering
 (wheel or arrows), debug panel, plus install-as-an-app, reset-car,
 restore-defaults and the model attribution.
 
-## The two cars
+## The three cars
 
-| | BMW M5 CS (F90) | 2025 BMW M4 CS VR46 Edition |
-|---|---|---|
-| engine | S63 4.4 twin-turbo **cross-plane V8**, 635 hp / 750 Nm | S58 3.0 twin-turbo **inline six**, 550 hp / 650 Nm |
-| mass | 1825 kg | 1760 kg |
-| drive | M xDrive | M xDrive |
-| model | 305,984 tris, 144 meshes, **no textures at all** | 166,313 tris, 48 meshes, **full PBR set** |
-| measured | 4.966 × 1.43 m, wheelbase 2.963 | 4.794 × 1.391 m, wheelbase 2.858 |
+| | BMW M5 CS (F90) | 2025 BMW M4 CS VR46 | Mercedes-Maybach GLS 600 |
+|---|---|---|---|
+| engine | S63 4.4 twin-turbo **cross-plane V8**, 635 hp / 750 Nm | S58 3.0 twin-turbo **inline six**, 550 hp / 650 Nm | M177 4.0 twin-turbo **cross-plane V8** + EQ Boost, 558 hp / 730 Nm |
+| mass | 1825 kg | 1760 kg | 2785 kg |
+| gearbox | ZF 8HP, 8 speeds | ZF 8HP51, 8 speeds | 9G-TRONIC, 9 speeds |
+| drive | M xDrive | M xDrive | 4MATIC |
+| model | 305,984 tris, 144 meshes, **no textures at all** | 166,313 tris, 48 meshes, **full PBR set** | 287,269 tris, 86 meshes, **no textures at all** |
+| measured | 4.966 × 1.43 m, wheelbase 2.963 | 4.794 × 1.391 m, wheelbase 2.858 | 5.054 × 1.813 m, wheelbase 3.058 |
+| special | — | — | **Recovery Mode** |
 
 Switching is a setting (⚙ → Car), not a page reload. `swapCar()` in `main.js`
 takes the old chassis out of the Rapier world, disposes its geometries,
@@ -106,20 +107,24 @@ unevenly there is real energy on the **half orders**. That half-order content
 evenly: order 3 dominates and the odd harmonics all but vanish, which is why a
 straight six howls instead of burbling. `SPECTRA` in `src/audio/EngineAudio.js`
 holds one cruise/load pair per layout, and `setEngine()` rebuilds the two
-periodic waves and hands them to the running oscillators.
+periodic waves and hands them to the running oscillators. The GLS shares the
+M5's cross-plane spectrum but idles at 700 rpm and stops at 6000, so the same
+waveform arrives an octave lower and never gets shrill.
 
-### Why the M4's materials are left alone
+### Why only the M4's materials are left alone
 
-The M5 came through Sketchfab's `materialmerger`, which threw away every
-texture and left 89 flat colours — it *needs* the material pass (clearcoat on
-the paint, matte rubber, polished rims) and a generated tyre tread or it reads
-like a clay model. The M4 keeps base-colour, metallic-roughness, normal and
-emissive maps, real transmission glass and clearcoat on the spoiler.
-Restyling that would destroy work that is already correct, so for this car the
-material pass is off (`restyleMaterials: false`), no tread is painted, and its
-head and tail lights are left exactly as the author baked them
-(`lightLayer: false` — `VehicleLights` keeps its state and the HUD lamp, it
-just draws nothing of its own).
+The M5 and the GLS came through exports that threw away every texture — 89 and
+63 flat colours respectively. They *need* the material pass (clearcoat on the
+paint, matte rubber, polished rims) or they read like clay models. The M4 keeps
+base-colour, metallic-roughness, normal and emissive maps, real transmission
+glass and clearcoat on the spoiler; restyling that would destroy work that is
+already correct, so for that car the material pass is off
+(`restyleMaterials: false`), no tread is painted, and its head and tail lights
+are left exactly as the author baked them (`lightLayer: false`).
+
+Which name means "paint", "glass" or "rubber" is a property of the model, not
+of the renderer: the M5's panels are `bodyshell`, the GLS's are `gls_paint`. So
+each car brings its own `restyle` set of patterns.
 
 One exception, and it is a performance one, not a style one: refracting glass
 (`KHR_materials_transmission`) makes three.js render the whole scene a second
@@ -129,58 +134,54 @@ everything else of that cost — refraction on `high`, ordinary alpha-blended
 glass below it, with the authored values kept on the material so switching
 back restores them exactly.
 
-## Recovery Mode — «Высвобождение» / «Раскачка»
+### Names lie; geometry does not
 
-Every driving game eventually needs an answer to *the car is on its roof in a
-ditch and there is nothing I can do*. Reset-to-spawn (`R`) is one answer, and a
-blunt one: it throws away where you were. Recovery Mode is the other — a small,
-bounded set of abilities that let you work the car free yourself.
+Both Sketchfab exports rename every node to `Object_N`, so parts are found by
+material name plus measured geometry. The GLS is the sharpest illustration of
+why the *measurement* half matters. Its export calls two materials `wheel_42a`
+and `wheel_42b` — **neither is a wheel**; `wheel_42b.038` spreads over
+1.89 × 1.39 × 4.95 m, the whole car. The real tyre is the one material the
+exporter never named, `Scene_-_Root.001`: of all 43 materials it is the only
+one forming four separate clusters of 0.29 × 0.81 × 0.81 m, one per corner,
+which is a 275/50 R21 to the centimetre.
 
-`F`, or the **REC** button, toggles it. While it is on:
+## Recovery Mode — the GLS's free-driving assist
+
+This is a real feature of the Mercedes-Maybach GLS 600, not a game idea. A GLS
+with E-ACTIVE BODY CONTROL can pump its air suspension up and down, repeatedly,
+on the spot. Bogged in sand, that is how it digs itself out: the body rises and
+drops, each drop packs the sand under the tyres and each lift unloads them, and
+with a little throttle the car walks out of the hole it made. Mercedes calls it
+free-driving assist; in Russian it is usually «режим высвобождения» or
+«раскачка».
+
+`F`, or the **REC** button, toggles it. Give it throttle while it rocks.
+
+**It is not a jump button.** No impulse is ever applied to the chassis. The
+only thing this touches is the suspension rest length of the four wheels —
+the one control the real car has too — and the body moves because the springs
+push it, through the same solver that handles every other bump in the game:
 
 | | |
 |---|---|
-| **JUMP** (`J` / the JUMP button) | a vertical impulse. Clears a kerb, hops out of a rut — and on the roof it becomes a *recovery flip*. |
-| **ROCK** (hold GAS or BRAKE below 11 km/h) | pulses the chassis fore and aft, the way you rock a car out of snow. |
-| **RIGHT** (steer while airborne or flipped) | steering becomes roll, so you can aim the landing. |
+| rest length | `0.38 ± 0.11 m` at 1.15 Hz, all four corners in phase |
+| spring rate | `78 → 179` on the way up only |
+| stops itself | above 4 m/s (14 km/h), or after 20 s |
 
-Everything is applied to the chassis rigid body. No teleports, no constraint
-fiddling: collisions, suspension and the ray-cast vehicle keep behaving exactly
-as they do the rest of the time.
+Stiffening only on the lift is what makes it work: a soft spring cannot push
+2.8 tonnes up in half a second, and staying stiff on the way down would hold
+the body up instead of letting it drop under its own weight.
 
-**The jump is derived, not tuned by feel.** For a height `h`, `v = sqrt(2gh)`
-and the impulse is `m·v` — 8,669 N·s for the M5 at 1.15 m. Measured in the
-deterministic run: the car rises **1.139 m**, and nothing rotates it
-(`minUp` stays at 1.0).
+Measured, from settled and stationary: the body swings **0.563 m** peak to peak
+(0.359 up, 0.204 down) over four pump cycles in four seconds. Driving away
+switches it off and puts the rest length back to the tuned 0.38 m exactly.
 
-**It is bounded.** A jump costs half a charge meter that refills at 0.32/s, so
-roughly one jump per 1.6 s sustained, two back to back after a quiet moment.
-The HUD shows the meter and the REC lamp. Without that, "jump" is just a flying
-car.
-
-**Air control is a target rate, not a torque** — and that is a correction, not
-a preference. The first version applied roll torque while the steering was
-held. It did flip the car, and then kept going: measured, the car passed
-upright at 0.67 s with 7.9 rad/s still on it and tumbled straight back onto its
-roof. Unbounded torque cannot be aimed. So the roll and yaw *components* of the
-angular velocity are steered towards a rate the player asks for (3.0 and
-1.4 rad/s, approached at 14 rad/s²), and everything perpendicular to those axes
-is left exactly as the physics made it.
-
-**The recovery flip** is the same idea taken to its conclusion. A jump taken on
-the roof puts the car in the air for `t = 2·sqrt(2h/g)` = 0.97 s, so the roll
-rate that turns it exactly half a turn in that time is `π/t` = 3.24 rad/s, set
-directly. Which way to roll is measured, not guessed: the direction that
-carries the car's own up vector towards world up. When it is *exactly* upside
-down that cross product vanishes and either way is as good, so the player's
-steering breaks the tie, and failing that it rolls right.
-
-Verified from 180°, 150° and −170° of roll, with and without steering held:
-every case ends upright, in three or four flips. A plain jump on the wheels is
-still a plain jump.
-
-Recovery Mode needs a real rigid body, so it reports itself **unavailable**
-under the no-WebAssembly `KinematicVehicle` fallback rather than pretending.
+**It belongs to the car, not to the player.** Only a car whose entry in
+`src/cars.js` sets `recoveryAssist: true` offers it. The M5 and the M4 have
+steel springs and no such function, so for them `recovery.status.available` is
+false and the REC button is not rendered at all. It also needs the real
+ray-cast suspension, so it reports itself unavailable under the
+no-WebAssembly `KinematicVehicle` fallback rather than pretending.
 
 ## Measured behaviour
 
@@ -327,7 +328,11 @@ all.
 
 `public/sw.js` is the service worker. It pre-caches from `dist/sw-manifest.json`
 (written by `scripts/build-sw-manifest.mjs` after every build — about 13 MB,
-the 7.5 MB car model included) because the worker only starts controlling the
+the 7.8 MB default car included; the other two cars are deliberately left out
+of the precache, because three models is 30 MB and making every player download
+all of it before the app will work offline is a poor trade for cars they may
+never select — those are cached the first time they are actually loaded, by the
+same runtime rule as everything else) because the worker only starts controlling the
 page *after* it activates, by which time the model has already been fetched;
 runtime caching alone would leave a first visitor with an app that opens offline
 and then cannot load the car. Navigations are network-first so a redeploy is
@@ -348,7 +353,7 @@ setup: **Settings → Pages → Source: GitHub Actions**.
 
 | | |
 |---|---|
-| draw calls | ~224 at medium with the M5, ~174 with the M4 (car + city + environment + shadow pass) |
+| draw calls | ~224 at medium with the M5, ~174 with the M4, ~141 with the GLS (car + city + environment + shadow pass) |
 | triangles per frame | ~350k at medium with the M5 (car is 306k), ~390k with the M4 (car is 166k, but its glass costs a transmission pass at `high`) |
 | shadows | one blob contact shadow always; the sun shadow casts from a **box proxy** at low/medium (12 triangles) and from the 47 large panels at high |
 | pixel ratio | capped at 1.0 / 1.5 / 2.0 by quality preset |
@@ -403,13 +408,15 @@ with no collisions or suspension travel — and the HUD says so.
 
 ## Model attribution
 
-Both models are **CC BY 4.0**, and the credit for whichever car is loaded is
+All three models are **CC BY 4.0**, and the credit for whichever car is loaded is
 shown in ⚙ → About.
 
 * "BMW M5 CS (F90)" by **fvrenbld** —
   https://sketchfab.com/3d-models/bmw-m5-cs-f90-8f74fb3420e24213aaeea33dc99450a3
 * "2025 BMW M4 CS VR46 Edition" by **BMW'S Lost Proxy** —
   https://sketchfab.com/3d-models/2025-bmw-m4-cs-vr46-edition-3d111a7ed0f544bc9215e3038db4c8dc
+* "Mersedes- Benz Maybach GLS 600" by **Black Snow** —
+  https://sketchfab.com/3d-models/mersedes-benz-maybach-gls-600-34c4687ba8204efaa7551afea9f5689f
 
 See `public/models/README.md` for what each file contains and how it was
 processed.

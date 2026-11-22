@@ -133,3 +133,71 @@ from geometry alone, is the check that the wheel split found the right
 triangles. One material (`…Wheel1A…Material.032`) covers rim, tyre and hub
 together, so `tire` in this car's material patterns matches that name rather
 than the word "tyre", which appears nowhere in the file.
+
+---
+
+## mercedes-gls600.glb — Mercedes-Maybach GLS 600
+
+| | |
+|---|---|
+| Title | **Mersedes- Benz Maybach GLS 600** |
+| Author | **Black Snow** — https://sketchfab.com/BlackSnow02 |
+| License | **CC BY 4.0** — http://creativecommons.org/licenses/by/4.0/ (commercial use allowed) |
+| Source | https://sketchfab.com/3d-models/mersedes-benz-maybach-gls-600-34c4687ba8204efaa7551afea9f5689f |
+| Exporter | Sketchfab 16.64.0 |
+
+Like the M5, this one carries **no textures at all** — 63 flat materials — so it
+gets the material pass and its look is rebuilt from material names. Unlike the
+M5, those names survived intact, and several of them are Russian: `gls_fara`
+(фара, headlight), `gls_svet` (свет, light), `gls_torpedka` (торпедка,
+dashboard), alongside `gls_stop`, `gls_sigl` / `gls_sigr` for the indicators.
+That is a large part of why the detector reads material names rather than
+guessing from English words: this car's lights would be invisible to any
+English-only pattern.
+
+### What was done to the file
+
+```
+gltf-transform prune/dedup/flatten/join/weld  → 270 primitives → 58
+COLOR_0 float32 → normalized ubyte            → 3.25 MB → 0.81 MB
+gltf-transform simplify --ratio 0.6           → 474,445 → 287,269 triangles
+                                              → 32.6 MB → 11.0 MB
+```
+
+`COLOR_0` was measured before being touched: 212,953 vertices carrying about
+**62 distinct colours**, most primitives a single flat colour. Float32 RGBA is
+16 bytes a vertex for that, and normalized unsigned byte is the standard glTF
+encoding for exactly this case — a 4× saving with nothing visible lost, and no
+extension needed.
+
+The simplify step is the one lossy decision here, and it was taken on purpose:
+474k triangles is 55 % more than the M5 and this is the heaviest car of the
+three. 11.0 MB also keeps the base64 copy under the 16 MB limit a published
+single-page build has per file. 
+
+### Finding the wheels when the names lie
+
+The export calls two materials `wheel_42a` and `wheel_42b`. **Neither is a
+wheel.** Measured, `wheel_42b.038` spreads over 1.89 × 1.39 × 4.95 m — the
+whole car.
+
+The real tyre is the one material the exporter never named: it came through as
+`Scene_-_Root.001`. Of all 43 materials it is the only one that forms four
+separate clusters of **0.29 × 0.81 × 0.81 m**, one per corner — which is a
+275/50 R21 to the centimetre. `gls_kaki.104` is the rim inside it, at 0.64 m.
+
+Measured after loading, against the real Maybach GLS 600:
+
+| | measured | real GLS 600 | error |
+|---|---|---|---|
+| length | 5.054 m | 5.205 m | −2.9 % |
+| height | 1.813 m | 1.840 m | −1.5 % |
+| wheelbase | 3.058 m | 3.135 m | −2.5 % |
+| front track | 1.607 m | 1.679 m | −4.3 % |
+| wheel diameter | 0.817 m | 0.808 m (275/50 R21) | +1.1 % |
+
+This car does **not** get a turning steering wheel: `gls_amg_steer` is an
+18-triangle AMG badge, and the rim itself is welded into the cabin mesh.
+Spinning a floating badge would look worse than not animating anything.
+
+It is also the only car with **Recovery Mode** — see SIMULATOR.md.

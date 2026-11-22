@@ -18,6 +18,17 @@ const DIST = new URL('../dist/', import.meta.url).pathname;
 // runtime if they are ever used.
 const SKIP = [/^sw\.js$/, /^sw-manifest\.json$/, /^draco\//, /^basis\//, /\.map$/];
 
+/**
+ * Only the car the game starts with is pre-cached. Three models is 30 MB, and
+ * making every player download all of it before the app will work offline is a
+ * poor trade for one they may never select — the others are cached the first
+ * time they are actually loaded, by the same runtime rule as everything else.
+ */
+const { CARS, DEFAULT_CAR_ID } = await import('../src/cars.js');
+for (const car of Object.values(CARS)) {
+  if (car.id !== DEFAULT_CAR_ID) SKIP.push(new RegExp(`^${car.modelUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`));
+}
+
 async function walk(dir) {
   const out = [];
   for (const entry of await readdir(dir, { withFileTypes: true })) {
