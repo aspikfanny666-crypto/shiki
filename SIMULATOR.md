@@ -81,7 +81,8 @@ restore-defaults and the model attribution.
 | mass | 1825 kg | 1760 kg | 2785 kg |
 | gearbox | ZF 8HP, 8 speeds | ZF 8HP51, 8 speeds | 9G-TRONIC, 9 speeds |
 | drive | M xDrive | M xDrive | 4MATIC |
-| model | 305,984 tris, 144 meshes, **no textures at all** | 166,313 tris, 48 meshes, **full PBR set** | 287,269 tris, 86 meshes, **no textures at all** |
+| model | 305,984 tris, 144 meshes, **no textures at all** | 166,313 tris, 48 meshes, **full PBR set** | 474,445 tris, 86 meshes, **no textures at all** |
+| file | 1.16 MB | 2.08 MB | 1.77 MB |
 | measured | 4.966 × 1.43 m, wheelbase 2.963 | 4.794 × 1.391 m, wheelbase 2.858 | 5.054 × 1.813 m, wheelbase 3.058 |
 | special | — | — | **Recovery Mode** |
 
@@ -164,17 +165,41 @@ push it, through the same solver that handles every other bump in the game:
 
 | | |
 |---|---|
-| rest length | `0.38 ± 0.11 m` at 1.15 Hz, all four corners in phase |
-| spring rate | `78 → 179` on the way up only |
+| rest length | `0.38 m → 0.54 m` and back, at 1.1 Hz, all four corners in phase |
+| spring rate | `78 → 125` on the way up only |
+| force cap | `1.75 ×` the 6,830 N static load each corner carries |
 | stops itself | above 4 m/s (14 km/h), or after 20 s |
 
-Stiffening only on the lift is what makes it work: a soft spring cannot push
-2.8 tonnes up in half a second, and staying stiff on the way down would hold
-the body up instead of letting it drop under its own weight.
+Three details carry the whole thing, and two of them are corrections.
 
-Measured, from settled and stationary: the body swings **0.563 m** peak to peak
-(0.359 up, 0.204 down) over four pump cycles in four seconds. Driving away
-switches it off and puts the rest length back to the tuned 0.38 m exactly.
+**It lifts, it does not bounce.** The stroke runs from the normal ride height
+*upwards* and back, never below. The first version swung symmetrically about
+the ride height, and driving the body *down* is what buries the tyres in the
+arches — which is exactly what showed up on screen.
+
+**The force cap is the difference between this and a jump.** Raising the rest
+length raises the force the spring applies, and with nothing limiting it the
+car simply launches: measured at the first attempt, the body rose 0.36 m and
+all four wheels left the ground **30 % of the time**. That is not what a GLS
+does in sand. Capping each corner's suspension force at 1.75 × the static load
+it carries means the push can never exceed what gravity holds down, so the
+wheels stay planted and only the body moves.
+
+**Stiffening only on the lift** is what makes the lift happen at all: a soft
+air spring cannot carry 2.8 tonnes to a new ride height in half a second, and
+staying stiff on the way down would hold the body up instead of letting it
+settle under its own weight.
+
+Measured, from settled and stationary: the body rises **0.178 m** and comes
+back, four wheels on the ground for **100 %** of the run — `wheelsOnGround`
+never drops below 4, in the hand-stepped test and in the live render loop
+alike. Driving away switches it off and puts the rest length back to the tuned
+0.38 m exactly.
+
+It is stepped by the physics solver, not by the frame: it commands a
+suspension position on a timed curve, and driving that from a variable frame
+time made the body lurch when the frame rate dropped — at 3 fps the phase
+advanced a third of a pump per call.
 
 **It belongs to the car, not to the player.** Only a car whose entry in
 `src/cars.js` sets `recoveryAssist: true` offers it. The M5 and the M4 have
@@ -314,6 +339,31 @@ collision boxes always match what is drawn:
 Side-face UVs are squeezed by `depth / width` so a window is the same size on
 the narrow side of a building as on the wide one.
 
+## Compression
+
+Every car is **Draco**-compressed. That one change took the three models from
+26 MB to 5.0 MB with **no geometry removed at all**:
+
+| | before | after |
+|---|---|---|
+| BMW M5 CS | 7.81 MB | **1.16 MB** |
+| BMW M4 CS | 7.25 MB | **2.08 MB** |
+| Maybach GLS 600 | 15.9 MB | **1.77 MB** |
+
+It replaced a worse idea. The GLS first shipped through
+`gltf-transform simplify --ratio 0.6`, which took it from 474k to 287k
+triangles to fit the size budget — and visibly dented the tailgate and rear
+bumper. Draco is six times smaller than that *and* keeps every one of the
+474,445 triangles, so the decimation is gone. Verified after the swap: all
+three cars report the same triangle count, mesh count, wheelbase, track and
+wheel radius as they did uncompressed, with no loader warnings.
+
+`createGLTFLoader` serves the decoder from `public/draco/`, so nothing is
+fetched from a CDN. The WebAssembly decoder is the fast one and is what a
+normally-hosted build uses; a published single-page build sets
+`window.__DRACO_JS_ONLY__` and ships the 512 KB pure-JS decoder instead,
+because the artifact host cannot be relied on to serve a `.wasm`.
+
 ## Install it on a phone
 
 The build is a PWA, so it can live on a home screen and run with no network at
@@ -327,12 +377,8 @@ all.
   the home screen.
 
 `public/sw.js` is the service worker. It pre-caches from `dist/sw-manifest.json`
-(written by `scripts/build-sw-manifest.mjs` after every build — about 13 MB,
-the 7.8 MB default car included; the other two cars are deliberately left out
-of the precache, because three models is 30 MB and making every player download
-all of it before the app will work offline is a poor trade for cars they may
-never select — those are cached the first time they are actually loaded, by the
-same runtime rule as everything else) because the worker only starts controlling the
+(written by `scripts/build-sw-manifest.mjs` after every build — about 10.5 MB,
+all three cars and the Draco decoder included) because the worker only starts controlling the
 page *after* it activates, by which time the model has already been fetched;
 runtime caching alone would leave a first visitor with an app that opens offline
 and then cannot load the car. Navigations are network-first so a redeploy is
@@ -354,6 +400,7 @@ setup: **Settings → Pages → Source: GitHub Actions**.
 | | |
 |---|---|
 | draw calls | ~224 at medium with the M5, ~174 with the M4, ~141 with the GLS (car + city + environment + shadow pass) |
+| model download | 5.0 MB for all three cars, Draco-compressed (26 MB uncompressed) |
 | triangles per frame | ~350k at medium with the M5 (car is 306k), ~390k with the M4 (car is 166k, but its glass costs a transmission pass at `high`) |
 | shadows | one blob contact shadow always; the sun shadow casts from a **box proxy** at low/medium (12 triangles) and from the 47 large panels at high |
 | pixel ratio | capped at 1.0 / 1.5 / 2.0 by quality preset |

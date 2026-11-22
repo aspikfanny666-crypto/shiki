@@ -15,7 +15,7 @@
  *
  * Usage: node scripts/build-artifact.mjs <output-directory>
  */
-import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, readdir, copyFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const out = process.argv[2];
@@ -34,6 +34,15 @@ const title = html.match(/<title>([^<]*)<\/title>/)?.[1] ?? 'BMW M5 F90 Simulato
 
 await mkdir(out, { recursive: true });
 await writeFile(join(out, 'app.js'), await readFile(join(DIST, 'assets', js)));
+
+/**
+ * Every car is Draco-compressed, so the page needs a decoder. The artifact
+ * host only serves ordinary web media types, and a .wasm is not one it can be
+ * relied on for — so this ships the pure-JS decoder, which is a single plain
+ * .js file, and the page sets __DRACO_JS_ONLY__ so DRACOLoader asks for it.
+ */
+await mkdir(join(out, 'draco'), { recursive: true });
+await copyFile(join(DIST, 'draco', 'draco_decoder.js'), join(out, 'draco', 'draco_decoder.js'));
 
 const { CARS, DEFAULT_CAR_ID } = await import('../src/cars.js');
 const lazy = {};
@@ -61,6 +70,7 @@ ${await readFile(join(DIST, 'assets', css), 'utf8')}
 <body>
 <script>
 window.__NO_SERVICE_WORKER__ = true;
+window.__DRACO_JS_ONLY__ = true;
 window.__BMW_EMBED_SCRIPTS__ = ${JSON.stringify(lazy)};
 </script>
 <div id="app"></div>
@@ -80,6 +90,7 @@ const size = (p) => readFile(p).then((b) => `${(b.length / 1024 / 1024).toFixed(
 console.log(`artifact bundle in ${out}`);
 console.log(`  index.html  ${(page.length / 1024).toFixed(0)} kB`);
 console.log(`  app.js      ${await size(join(out, 'app.js'))}`);
+console.log(`  draco/draco_decoder.js  ${await size(join(out, 'draco', 'draco_decoder.js'))}`);
 for (const car of Object.values(CARS)) {
   const file = car.id === DEFAULT_CAR_ID ? 'model.js' : `model-${car.id}.js`;
   console.log(`  ${file.padEnd(16)}${await size(join(out, file))}${car.id === DEFAULT_CAR_ID ? '' : '  (lazy)'}`);

@@ -339,7 +339,17 @@ visual.setGlassQuality(settings.get('quality'));
 const clock = new Clock();
 let fps = 60;
 let flippedFor = 0;
-const stepPhysics = (step) => physics.update(step);
+/**
+ * One fixed physics step. Recovery Mode runs here rather than once per frame:
+ * it commands a suspension position on a timed curve, and driving that from a
+ * variable frame time makes the body lurch when the frame rate drops — at
+ * 3 fps the phase advanced a third of a pump per call. Stepping it with the
+ * solver makes it behave the same at 30, 60 and 120 fps.
+ */
+const stepPhysics = (step) => {
+  recovery.update(step, controls.state, physics.telemetry);
+  physics.update(step);
+};
 
 loader?.classList.add('done');
 setTimeout(() => loader?.remove(), 600);
@@ -357,7 +367,6 @@ renderer.setAnimationLoop(() => {
 
   const t = physics.telemetry;
 
-  recovery.update(dt, input, t);
   lights.update(dt, t);
   audio.update(dt, t);
   // the city answers the headlight switch: windows and street lamps come up

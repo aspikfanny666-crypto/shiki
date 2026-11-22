@@ -14,6 +14,14 @@ export function createGLTFLoader(renderer) {
 
   const draco = new DRACOLoader();
   draco.setDecoderPath(DECODER_PATHS.draco);
+  /**
+   * The WebAssembly decoder is the fast one and is what a normally-hosted
+   * build uses. A single-page build published somewhere that only serves
+   * ordinary web media types has no way to serve a .wasm, so it sets this
+   * flag and ships the pure-JS decoder instead — slower to start, but it is
+   * one file and it is plain JavaScript.
+   */
+  if (window.__DRACO_JS_ONLY__) draco.setDecoderConfig({ type: 'js' });
   loader.setDRACOLoader(draco);
 
   loader.setMeshoptDecoder(MeshoptDecoder);

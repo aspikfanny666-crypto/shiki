@@ -20,16 +20,36 @@
  * steel springs and no such function, so for them the button does not exist.
  */
 
-/** Peak rise and fall of the rest length, in metres. */
-const AMPLITUDE = 0.11;
-/** Pumping frequency. Slow enough that the body actually travels. */
-const PUMP_HZ = 1.15;
 /**
- * Spring rate while the assist runs, as a multiple of the car's own. The real
- * system stiffens as it lifts, or the body would just wallow instead of
- * rising — a soft spring cannot push 2.8 tonnes up in half a second.
+ * How far the body is lifted above its normal ride height, in metres. The
+ * pump goes from 0 to this and back — it never squats BELOW normal, because
+ * the real car does not either, and because driving the body down is what
+ * buries the tyres in the arches.
  */
-const STIFFNESS_BOOST = 2.3;
+const LIFT = 0.16;
+/** Pumping frequency. Slow enough that the body actually travels. */
+const PUMP_HZ = 1.1;
+/**
+ * Spring rate while the assist runs, as a multiple of the car's own. A soft
+ * air spring cannot carry 2.8 tonnes to a new ride height in half a second.
+ */
+const STIFFNESS_BOOST = 1.6;
+/**
+ * The force cap is what keeps the car on the ground, and it is the whole
+ * difference between this and a jump button.
+ *
+ * Raising the rest length raises the force the spring applies, and with
+ * nothing limiting it the car simply launches: measured at the first attempt,
+ * the body rose 0.36 m and all four wheels left the ground for 30 % of the
+ * time. That is not what a GLS does in sand, and it is exactly what the player
+ * saw — "машина прыгает, а не качается".
+ *
+ * So each corner's suspension force is capped at this multiple of the static
+ * load it carries. Above 1.0 the body is pushed up; below about 2.0 the
+ * push can never exceed what gravity holds down, so the wheels stay planted
+ * and only the body moves — which is the point.
+ */
+const FORCE_LIMIT = 1.75;
 /** The assist is a low-speed recovery tool; above this it switches itself off. */
 const MAX_SPEED_MPS = 4.0;
 /** It also stops itself after this long, like the real one. */
@@ -68,6 +88,10 @@ export class RecoveryMode {
     );
     this.restLength = physics?.tuning?.suspension?.restLength ?? 0.3;
     this.stiffness = physics?.tuning?.suspension?.stiffness ?? 100;
+    this.maxForce = physics?.tuning?.suspension?.maxForce ?? 40000;
+    // static load on one corner, which is what FORCE_LIMIT is a multiple of
+    const mass = physics?.tuning?.mass ?? 1800;
+    this.cornerLoad = (mass * 9.81) / 4;
   }
 
   setActive(on) {
@@ -91,6 +115,7 @@ export class RecoveryMode {
     for (let i = 0; i < this.physics.wheelKeys.length; i++) {
       c.setWheelSuspensionRestLength(i, this.restLength);
       c.setWheelSuspensionStiffness(i, this.stiffness);
+      c.setWheelMaxSuspensionForce(i, this.maxForce);
     }
     this.lift = 0;
   }
@@ -116,19 +141,21 @@ export class RecoveryMode {
     this.phase = (this.phase + PUMP_HZ * dt) % 1;
     if (this.phase < before) this.cycles += 1;
 
-    // A full cosine cycle, all four corners together, so the whole body rises
-    // and drops rather than the car rolling from side to side.
-    this.lift = -Math.cos(this.phase * Math.PI * 2);
-    const rest = this.restLength + this.lift * AMPLITUDE;
+    // 0 → 1 → 0 over one cycle, all four corners together, so the whole body
+    // rises and settles rather than the car rolling from side to side. It
+    // never goes below 0: the normal ride height is the bottom of the stroke.
+    this.lift = (1 - Math.cos(this.phase * Math.PI * 2)) / 2;
+    const rest = this.restLength + this.lift * LIFT;
     // Stiffen on the way up, where the work is done; stay soft on the way
-    // down, so the body drops under its own weight instead of being pushed.
-    const rising = this.lift > 0;
+    // down, so the body settles under its own weight instead of being pushed.
+    const rising = this.phase < 0.5;
     const stiffness = this.stiffness * (rising ? STIFFNESS_BOOST : 1);
 
     const c = this.physics.controller;
     for (let i = 0; i < this.physics.wheelKeys.length; i++) {
       c.setWheelSuspensionRestLength(i, rest);
       c.setWheelSuspensionStiffness(i, stiffness);
+      c.setWheelMaxSuspensionForce(i, this.cornerLoad * FORCE_LIMIT);
     }
   }
 
@@ -149,8 +176,9 @@ export class RecoveryMode {
     return [
       'RecoveryMode (GLS free-driving assist)',
       `  available: ${this.supported}${this.supported ? '' : ' — this car has no such function, or there is no ray-cast suspension to pump'}`,
-      `  pumps the suspension rest length ${this.restLength.toFixed(2)} ±${AMPLITUDE} m at ${PUMP_HZ} Hz`,
+      `  lifts the body ${LIFT} m above its ${this.restLength.toFixed(2)} m ride height at ${PUMP_HZ} Hz, never below it`,
       `  spring rate ${this.stiffness} → ${Math.round(this.stiffness * STIFFNESS_BOOST)} on the way up`,
+      `  suspension force capped at ${FORCE_LIMIT}x the ${Math.round(this.cornerLoad)} N static corner load, so the wheels stay down`,
       `  stops itself above ${MAX_SPEED_MPS} m/s (${Math.round(MAX_SPEED_MPS * 3.6)} km/h) or after ${RUN_SECONDS} s`,
       '  no impulse is applied to the chassis: the body moves because the springs push it',
     ].join('\n');

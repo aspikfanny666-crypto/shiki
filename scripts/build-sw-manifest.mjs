@@ -16,18 +16,16 @@ const DIST = new URL('../dist/', import.meta.url).pathname;
 // Decoder blobs are fetched only when a model actually needs them; the car in
 // this build does not, so they stay out of the precache and are cached at
 // runtime if they are ever used.
-const SKIP = [/^sw\.js$/, /^sw-manifest\.json$/, /^draco\//, /^basis\//, /\.map$/];
-
 /**
- * Only the car the game starts with is pre-cached. Three models is 30 MB, and
- * making every player download all of it before the app will work offline is a
- * poor trade for one they may never select — the others are cached the first
- * time they are actually loaded, by the same runtime rule as everything else.
+ * Draco IS precached: every car is Draco-compressed now, so the decoder is not
+ * optional any more — without it an offline launch has a model it cannot read.
+ * Basis/KTX2 stays out: no car uses it.
+ *
+ * All three cars are precached too. Draco took them from 26 MB to 5 MB
+ * together, which is small enough that there is no reason to make the player
+ * go back online to try a different one.
  */
-const { CARS, DEFAULT_CAR_ID } = await import('../src/cars.js');
-for (const car of Object.values(CARS)) {
-  if (car.id !== DEFAULT_CAR_ID) SKIP.push(new RegExp(`^${car.modelUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`));
-}
+const SKIP = [/^sw\.js$/, /^sw-manifest\.json$/, /^basis\//, /\.map$/, /^draco\/draco_decoder\.js$/];
 
 async function walk(dir) {
   const out = [];

@@ -1,12 +1,13 @@
 # public/models
 
-Two cars ship here. Which one is loaded is a user setting; the catalogue that
-describes them (dimensions, physics tuning, material patterns, how much the
-renderer may restyle them) is `src/cars.js`.
+Three cars ship here, all Draco-compressed. Which one is loaded is a user
+setting; the catalogue that describes them (dimensions, physics tuning,
+material patterns, how much the renderer may restyle them) is `src/cars.js`.
 
 ```
-public/models/bmw-f90.glb      7.8 MB, glTF binary, 305,984 triangles, 144 meshes
-public/models/bmw-m4-cs.glb    7.2 MB, glTF binary, 166,313 triangles,  48 meshes
+public/models/bmw-f90.glb      1.16 MB, Draco glTF binary, 305,984 triangles, 144 meshes
+public/models/bmw-m4-cs.glb    2.08 MB, Draco glTF binary, 166,313 triangles,  48 meshes
+public/models/mercedes-gls600.glb  1.77 MB, Draco glTF binary, 474,445 triangles, 86 meshes
 ```
 
 ## bmw-f90.glb — BMW M5 CS (F90)
@@ -160,8 +161,7 @@ English-only pattern.
 ```
 gltf-transform prune/dedup/flatten/join/weld  → 270 primitives → 58
 COLOR_0 float32 → normalized ubyte            → 3.25 MB → 0.81 MB
-gltf-transform simplify --ratio 0.6           → 474,445 → 287,269 triangles
-                                              → 32.6 MB → 11.0 MB
+gltf-transform draco                          → 15.9 MB → 1.77 MB
 ```
 
 `COLOR_0` was measured before being touched: 212,953 vertices carrying about
@@ -170,10 +170,15 @@ gltf-transform simplify --ratio 0.6           → 474,445 → 287,269 triangles
 encoding for exactly this case — a 4× saving with nothing visible lost, and no
 extension needed.
 
-The simplify step is the one lossy decision here, and it was taken on purpose:
-474k triangles is 55 % more than the M5 and this is the heaviest car of the
-three. 11.0 MB also keeps the base64 copy under the 16 MB limit a published
-single-page build has per file. 
+**All 474,445 triangles are still there.** An earlier version of this file went
+through `gltf-transform simplify --ratio 0.6` to fit a size budget, dropping it
+to 287k — and that visibly dented the tailgate and the rear bumper. Draco is
+six times smaller than the simplified version *and* lossless in topology, so
+the decimation was removed. Measured after the swap, the loader reports exactly
+the same triangle count, mesh count, wheelbase, track and wheel radius as the
+uncompressed file.
+
+
 
 ### Finding the wheels when the names lie
 
