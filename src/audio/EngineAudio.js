@@ -490,6 +490,89 @@ export class EngineAudio {
    * @param {number|null} atTime schedule at this context time instead of "now"
    *        — used when rendering offline, where currentTime does not advance
    */
+  /**
+   * The GLS's hydraulic pump, for Recovery Mode.
+   *
+   * Two sounds, both of which the real car makes and both of which are
+   * genuinely informative rather than decorative: a whine whose pitch follows
+   * how hard the pump is working, and a valve clunk each time the stroke
+   * changes direction, which is the moment the body stops rising and starts
+   * falling. Built lazily, because only one of the three cars has it.
+   */
+  #buildPump(ctx) {
+    if (this.pumpOut) return;
+    this.pumpOut = ctx.createGain();
+    this.pumpOut.gain.value = 0;
+    this.pumpOut.connect(this.cabin ?? ctx.destination);
+
+    this.pumpOsc = ctx.createOscillator();
+    this.pumpOsc.type = 'sawtooth';
+    this.pumpOsc.frequency.value = 180;
+    const band = ctx.createBiquadFilter();
+    band.type = 'bandpass';
+    band.frequency.value = 1500;
+    band.Q.value = 5.5;
+    this.pumpOsc.connect(band).connect(this.pumpOut);
+    this.pumpOsc.start();
+
+    // a breath of hiss riding with it, so it is not a pure tone
+    if (this.noiseBuffer) {
+      const hiss = ctx.createBufferSource();
+      hiss.buffer = this.noiseBuffer;
+      hiss.loop = true;
+      const hp = ctx.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.value = 2600;
+      this.pumpHiss = ctx.createGain();
+      this.pumpHiss.gain.value = 0.12;
+      hiss.connect(hp).connect(this.pumpHiss).connect(this.pumpOut);
+      hiss.start();
+    }
+  }
+
+  /** A short, dull thud: the valves changing over at the top or bottom. */
+  #valveClunk(now) {
+    const ctx = this.ctx;
+    if (!ctx || !this.noiseBuffer) return;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 320;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(0.5, now + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.1);
+    src.connect(lp).connect(g).connect(this.pumpOut ?? this.cabin);
+    src.start(now, Math.random() * 0.5, 0.14);
+  }
+
+  /**
+   * @param {object} status RecoveryMode.status
+   * @param {number} [atTime]
+   */
+  updateRecovery(status, atTime = null) {
+    if (!this.running || !status) return;
+    const ctx = this.ctx;
+    const now = atTime ?? ctx.currentTime;
+    const ramp = status.ramp ?? 0;
+    if (ramp <= 0 && !this.pumpOut) return;
+    this.#buildPump(ctx);
+
+    // the pump works hardest at the extremes of the stroke, where it is either
+    // filling or dumping, and coasts through the middle
+    const effort = Math.abs(status.phase ?? 0);
+    this.pumpOut.gain.setTargetAtTime(0.085 * ramp * (0.45 + 0.55 * effort), now, 0.05);
+    this.pumpOsc.frequency.setTargetAtTime(150 + 170 * effort, now, 0.06);
+
+    // clunk on each change of direction, i.e. each zero crossing of the stroke
+    const side = Math.sign(status.phase ?? 0);
+    if (ramp > 0.25 && side !== 0 && side !== this._pumpSide) {
+      this._pumpSide = side;
+      this.#valveClunk(now);
+    }
+  }
+
   update(dt, t, atTime = null) {
     if (!this.running) return;
 

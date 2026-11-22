@@ -163,6 +163,13 @@ export class SettingsPanel {
       <div class="row col"><span>Touch steering</span>
         ${seg('touchSteering', [{ value: 'wheel', label: 'Wheel' }, { value: 'arrows', label: 'Arrows' }])}
       </div>
+      <div class="row col"><span>Bounce pattern <b>(GLS)</b></span>
+        ${seg('bouncePattern', [{ value: 'sync', label: 'Sync' }, { value: 'walk', label: 'Walk' }, { value: 'diagonal', label: 'Diag' }])}
+      </div>
+      <p class="about dim">How the four struts are phased in Recovery Mode.
+      <b>Sync</b> lifts the whole body at once, as the real car does in the
+      adverts. <b>Walk</b> offsets the rear axle by a quarter cycle so the car
+      pitches and packs one axle at a time, which digs out faster.</p>
       ${toggle('debug', 'Debug panel')}
 
       <div class="row actions">

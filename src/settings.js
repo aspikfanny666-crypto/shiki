@@ -26,6 +26,7 @@ export const DEFAULTS = {
   steeringSensitivity: 1.0, // 0.5 – 1.6
   controlLayout: 'right', // right | left  (which thumb gets the pedals)
   touchSteering: 'wheel', // wheel | arrows
+  bouncePattern: 'walk', // sync | walk | diagonal — Recovery Mode strut phasing
   debug: false,
 };
 

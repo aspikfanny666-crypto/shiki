@@ -1,5 +1,7 @@
 import {
   BoxGeometry,
+  CircleGeometry,
+  TorusGeometry,
   Color,
   CanvasTexture,
   CylinderGeometry,
@@ -17,6 +19,7 @@ import {
   Vector3,
 } from 'three';
 import { City } from './City.js';
+import { terrain, SURFACES } from './Terrain.js';
 
 /**
  * The driving environment: a large asphalt pad with painted markings, kerbs,
@@ -62,6 +65,35 @@ function asphaltTexture() {
   tex.repeat.set(ASPHALT / 6, ASPHALT / 6);
   tex.colorSpace = SRGBColorSpace;
   tex.anisotropy = 4;
+  return tex;
+}
+
+/** Dry sand: grain plus a few wind ripples, so a flat disc does not read flat. */
+function sandTexture() {
+  const size = 512;
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#c9ab7d';
+  ctx.fillRect(0, 0, size, size);
+  for (let i = 0; i < 9000; i++) {
+    const g = 0.5 + Math.random() * 0.5;
+    ctx.fillStyle = `rgba(${Math.round(120 * g)},${Math.round(100 * g)},${Math.round(70 * g)},0.18)`;
+    ctx.fillRect(Math.random() * size, Math.random() * size, 1.6, 1.6);
+  }
+  ctx.strokeStyle = 'rgba(255,245,220,0.16)';
+  ctx.lineWidth = 2.5;
+  for (let i = 0; i < 26; i++) {
+    const y = (i / 26) * size + Math.random() * 6;
+    ctx.beginPath();
+    for (let x = 0; x <= size; x += 16) ctx.lineTo(x, y + Math.sin(x * 0.03 + i) * 5);
+    ctx.stroke();
+  }
+  const tex = new CanvasTexture(c);
+  tex.colorSpace = SRGBColorSpace;
+  tex.wrapS = tex.wrapT = RepeatWrapping;
+  tex.repeat.set(5, 5);
+  tex.anisotropy = 8;
   return tex;
 }
 
@@ -169,6 +201,7 @@ export class Environment {
     this.#buildCity();
     this.#buildCones();
     this.#buildRamps();
+    this.#buildSandPits();
   }
 
   get asphaltSize() {
@@ -311,6 +344,53 @@ export class Environment {
       quality: this.quality,
       addCollider: ({ size, position }) => this.physicsWorld.addStaticBox({ size, position, visible: false }),
     });
+  }
+
+  /**
+   * Somewhere to get stuck.
+   *
+   * These are not holes in the collision — the ground stays flat, which is
+   * what keeps the ray-cast vehicle well behaved. What changes is the tyre
+   * model: inside a patch the wheels have about half the grip, a spinning
+   * wheel digs itself in, and a load peak packs it back down. That is the
+   * loop Recovery Mode exists to break, and it is registered here rather than
+   * in the physics so the geometry and the surface data cannot drift apart.
+   */
+  #buildSandPits() {
+    const pits = [
+      // big enough that a car which starts to spin cannot simply drive out of
+      // it before it has dug itself in
+      { x: 72, z: 68, radius: 34 },
+      { x: -84, z: -34, radius: 18 },
+      { x: 18, z: 100, radius: 12 },
+    ];
+    const tex = sandTexture();
+    const mat = new MeshStandardMaterial({ map: tex, color: 0xffffff, roughness: 1, metalness: 0 });
+    this.sandPits = [];
+
+    for (const pit of pits) {
+      terrain.addPatch(pit.x, pit.z, pit.radius, SURFACES.sand);
+      const mesh = new Mesh(new CircleGeometry(pit.radius, 48), mat);
+      mesh.name = 'SandPit';
+      mesh.rotation.x = -Math.PI / 2;
+      // above the asphalt and its markings, below nothing else
+      mesh.position.set(pit.x, 0.012, pit.z);
+      mesh.receiveShadow = true;
+      mesh.castShadow = false;
+      this.root.add(mesh);
+      this.sandPits.push(mesh);
+
+      // a low rim of spilled sand, so the edge is not a decal floating on tar
+      const rim = new Mesh(
+        new TorusGeometry(pit.radius, 0.22, 6, 44),
+        new MeshStandardMaterial({ color: 0xbda77a, roughness: 1 }),
+      );
+      rim.name = 'SandPitRim';
+      rim.rotation.x = -Math.PI / 2;
+      rim.position.set(pit.x, 0.06, pit.z);
+      rim.receiveShadow = true;
+      this.root.add(rim);
+    }
   }
 
   /** Knock-over cones: one instanced mesh, one dynamic body each. */

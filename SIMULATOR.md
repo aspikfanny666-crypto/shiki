@@ -16,9 +16,9 @@ glTF model. `npm run dev`, then open http://localhost:5173.
 | `A` `D` / `←` `→` | steer |
 | `Space` | handbrake (locks the rear axle) |
 | `R` | reset the car |
-| `F` | Recovery Mode — only on a car that has one (the GLS 600) |
 | `C` | camera: chase → close → hood → cockpit → free |
 | `L` | headlights (also brings up the city's windows and street lamps) |
+| `F` | Recovery Mode — GLS only |
 | `Z` / `X` | left / right indicator |
 
 On touch devices an on-screen pad appears automatically:
@@ -84,7 +84,7 @@ restore-defaults and the model attribution.
 | model | 305,984 tris, 144 meshes, **no textures at all** | 166,313 tris, 48 meshes, **full PBR set** | 474,445 tris, 86 meshes, **no textures at all** |
 | file | 1.16 MB | 2.08 MB | 1.77 MB |
 | measured | 4.966 × 1.43 m, wheelbase 2.963 | 4.794 × 1.391 m, wheelbase 2.858 | 5.054 × 1.813 m, wheelbase 3.058 |
-| special | — | — | **Recovery Mode** |
+| special | — | — | **Recovery Mode** (air suspension) |
 
 Switching is a setting (⚙ → Car), not a page reload. `swapCar()` in `main.js`
 takes the old chassis out of the Rapier world, disposes its geometries,
@@ -146,67 +146,127 @@ exporter never named, `Scene_-_Root.001`: of all 43 materials it is the only
 one forming four separate clusters of 0.29 × 0.81 × 0.81 m, one per corner,
 which is a 275/50 R21 to the centimetre.
 
-## Recovery Mode — the GLS's free-driving assist
+## Recovery Mode / Bounce Mode — the GLS's free-driving assist
 
-This is a real feature of the Mercedes-Maybach GLS 600, not a game idea. A GLS
-with E-ACTIVE BODY CONTROL can pump its air suspension up and down, repeatedly,
-on the spot. Bogged in sand, that is how it digs itself out: the body rises and
-drops, each drop packs the sand under the tyres and each lift unloads them, and
-with a little throttle the car walks out of the hole it made. Mercedes calls it
-free-driving assist; in Russian it is usually «режим высвобождения» or
-«раскачка».
+A real feature of the Mercedes-Maybach GLS 600, not a game idea. A GLS with
+E-ACTIVE BODY CONTROL pumps its air suspension up and down on the spot, and
+that is how it digs itself out of sand: the body rises and drops, each drop
+packs the sand under the tyres, each lift unloads them, and with a little
+throttle the car walks out of the hole it made.
 
 `F`, or the **REC** button, toggles it. Give it throttle while it rocks.
 
-**It is not a jump button.** No impulse is ever applied to the chassis. The
-only thing this touches is the suspension rest length of the four wheels —
-the one control the real car has too — and the body moves because the springs
-push it, through the same solver that handles every other bump in the game:
+### Four independent struts
+
+Rapier's ray-cast vehicle already gives each wheel its own spring, damper and
+rest length, so this drives the one thing the real car drives — the target
+length of each strut:
+
+> `L_target,i(t) = L_base + lift + A · sin(2π f t + φ_i)`
+
+and the solver turns that into `F = k(L₀ − L) − c·v` at each corner, pushing
+the body up and the wheel down. **Nothing touches the chassis directly**: no
+impulses, no teleports, no velocity writes. It is not a jump button.
 
 | | |
 |---|---|
-| rest length | `0.38 m → 0.54 m` and back, at 1.1 Hz, all four corners in phase |
-| spring rate | `78 → 125` on the way up only |
-| force cap | `1.75 ×` the 6,830 N static load each corner carries |
-| stops itself | above 4 m/s (14 km/h), or after 20 s |
+| `L_base` | the car's own 0.38 m, raised 0.055 m for off-road |
+| `A`, `f` | 0.075 m at 1.25 Hz |
+| `φ_i` | per corner — see the patterns below |
+| dampers | `× 0.55` while running |
+| droop | `× 1.7` while running |
+| force cap | `1.55 ×` the 6,830 N static load each corner carries |
+| ramps | 1.5 s in, 1.0 s out |
 
-Three details carry the whole thing, and two of them are corrections.
+**Why the amplitude is at the bottom of the useful range.** Body acceleration
+in a sinusoidal stroke is `a = ω²A`, and a spring can only produce it by
+swinging its force about the car's weight: `a = g·(F/mg − 1)`. At 0.10 m and
+1.5 Hz that is 0.72 g, which needs the force to reach 1.72 × static with no
+margin at all — and anything past the top throws the car. Measured at those
+values: the body swung **0.574 m**, four times the stroke, with all four wheels
+off the ground 17 % of the time. 0.075 m at 1.25 Hz asks 0.47 g, a force swing
+of 0.53 … 1.47 × static, which sits inside the cap and still gives about 15 cm
+of body travel.
 
-**It lifts, it does not bounce.** The stroke runs from the normal ride height
-*upwards* and back, never below. The first version swung symmetrically about
-the ride height, and driving the body *down* is what buries the tyres in the
-arches — which is exactly what showed up on screen.
+**Why there is a governor.** Open-loop numbers cannot be trusted here: the
+stroke is deliberately near the body's resonance and the damping is
+deliberately low, and resonance does not care what the numbers were chosen to
+produce. So amplitude is scaled by a factor pulled down at 2.5/s the moment a
+wheel leaves the ground and crept back at 0.35/s while all four are planted. It
+is the difference between "these values should keep it down" and "it is kept
+down". The `diagonal` pattern is aggressive enough to trip it: measured, the
+governor settles it at ×0.26.
 
-**The force cap is the difference between this and a jump.** Raising the rest
-length raises the force the spring applies, and with nothing limiting it the
-car simply launches: measured at the first attempt, the body rose 0.36 m and
-all four wheels left the ground **30 % of the time**. That is not what a GLS
-does in sand. Capping each corner's suspension force at 1.75 × the static load
-it carries means the push can never exceed what gravity holds down, so the
-wheels stay planted and only the body moves.
+### Strut phasing (⚙ → Bounce pattern)
 
-**Stiffening only on the lift** is what makes the lift happen at all: a soft
-air spring cannot carry 2.8 tonnes to a new ride height in half a second, and
-staying stiff on the way down would hold the body up instead of letting it
-settle under its own weight.
+| pattern | φ (FL, FR, RL, RR) | body travel | corner spread | wheels ever off |
+|---|---|---|---|---|
+| **sync** | 0, 0, 0, 0 | 19.4 cm | 0 | 0.2 % of the time |
+| **walk** | 0, 0, π/2, π/2 | 13.8 cm | 10.6 cm | never |
+| **diagonal** | 0, π/2, π/2, 0 | 8.1 cm | 6.4 cm | never (governed to ×0.26) |
 
-Measured, from settled and stationary: the body rises **0.178 m** and comes
-back, four wheels on the ground for **100 %** of the run — `wheelsOnGround`
-never drops below 4, in the hand-stepped test and in the live render loop
-alike. Driving away switches it off and puts the rest length back to the tuned
-0.38 m exactly.
+`sync` lifts the whole body at once, which is what the car does in the adverts.
+`walk` offsets the rear axle by a quarter cycle so the car pitches and packs
+one axle at a time.
 
-It is stepped by the physics solver, not by the frame: it commands a
-suspension position on a timed curve, and driving that from a variable frame
-time made the body lurch when the frame rate dropped — at 3 fps the phase
-advanced a third of a pump per call.
+### It has to actually help
 
-**It belongs to the car, not to the player.** Only a car whose entry in
-`src/cars.js` sets `recoveryAssist: true` offers it. The M5 and the M4 have
-steel springs and no such function, so for them `recovery.status.available` is
-false and the REC button is not rendered at all. It also needs the real
-ray-cast suspension, so it reports itself unavailable under the
-no-WebAssembly `KinematicVehicle` fallback rather than pretending.
+An animation that looks like it is helping would be worthless, so the payoff
+lives in the tyre model rather than here. `src/scene/Terrain.js` marks circular
+patches of loose ground, and `VehiclePhysics.#updateTerrain` gives every wheel
+a **sink depth**:
+
+* a loose surface cuts grip outright (sand to 0.40) and adds heavy rolling
+  drag (coefficient 0.30 — about 8 kN against 2.8 tonnes, the same order as the
+  drive force, so the car bogs rather than blasting through);
+* a wheel **digs in** when it is slipping, and it slips when the drivetrain
+  asks for more force than the tyre can transmit — a real comparison of drive
+  force against `μ · load`, not a proxy;
+* a **load peak packs it back down**. Any peak: a kerb, a bump, or this.
+  Deliberately not special-cased to Recovery Mode — the assist earns its effect
+  through the physics instead of being handed one.
+
+A peak means a load well above what that corner has been carrying *lately*,
+measured against a low-pass of its own load, not against its static share. An
+earlier version compared against the static share, read the sustained squat
+under acceleration as continuous hammering, and packed the sand exactly as fast
+as the wheels dug it: `sink` sat at 0.00 for entire runs.
+
+**Measured end to end.** Drive the GLS into the big pit at full throttle and it
+digs in over 2.5 s, slowing from 17 km/h to a standstill 13 m in. Then, from
+buried, 14 s of full throttle:
+
+| | distance | sink after |
+|---|---|---|
+| no assist | **1.39 m** — still buried, still on sand | 1.00 |
+| assist, `sync` | **102 m** — out, back on tarmac | 0.00 |
+| assist, `walk` | **110 m** — out, back on tarmac | 0.00 |
+
+### State machine
+
+Entry needs a gear selected (not P or N) and under 5 km/h, as MBUX does. It
+releases itself above 15 km/h, fading out over a second. Hydraulic heat builds
+over 75 s of continuous running; at full it stops itself and will not restart
+until heat has bled back below 35 %. The HUD bar is that heat, and the four
+small bars above it are the four struts, as the car's own screen draws them.
+
+It is stepped by the physics solver, not by the frame: it commands a suspension
+position on a timed curve, and driving that from a variable frame time made the
+body lurch when the frame rate dropped — at 3 fps the phase advanced a third of
+a pump per call.
+
+Only a car whose entry in `src/cars.js` sets `recoveryAssist: true` offers it.
+The M5 and the M4 have steel springs, so for them the REC button is not
+rendered at all, and it needs the real ray-cast suspension, so it reports
+itself unavailable under the no-WebAssembly fallback rather than pretending.
+
+### Sound
+
+`EngineAudio.updateRecovery` adds the hydraulic pump: a band-passed whine whose
+pitch and level follow how hard the pump is working — hardest at the extremes
+of the stroke, where it is filling or dumping, coasting through the middle —
+plus a dull valve clunk at each change of direction, which is the moment the
+body stops rising and starts falling.
 
 ## Measured behaviour
 
@@ -310,6 +370,21 @@ barrier posts as instanced meshes, Armco runs, concrete walls, two ramps, two
 speed bumps and twenty knock-over cones — the cones are one InstancedMesh
 driven by twenty dynamic cylinder bodies. Collision geometry is cuboids and
 cylinders only.
+
+### Sand
+
+Three sand pits, 34 m, 18 m and 12 m across, sit on the open parts of the pad.
+They are **not holes in the collision** — the ground stays flat, which is what
+keeps the ray-cast vehicle well behaved. What changes is the tyre model: inside
+a patch the wheels have 40 % of their grip, rolling drag goes up roughly
+fifteen-fold, a spinning wheel digs itself in and a load peak packs it back
+down. `src/scene/Terrain.js` holds the patch list and one `surfaceAt(x, z)`
+lookup that the physics calls per wheel per step; `Environment` registers the
+patches as it draws them, so the geometry and the surface data cannot drift
+apart.
+
+This is what Recovery Mode exists for, and the only place in the simulator
+where it does anything.
 
 ### The city (`src/scene/City.js`)
 

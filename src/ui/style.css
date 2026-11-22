@@ -111,6 +111,29 @@ canvas { display: block; }
   transition: width 90ms linear, background 0.12s;
 }
 .hud-recovery .bar i.ready { background: var(--accent); }
+.hud-recovery label b { color: var(--accent); font-weight: 400; }
+/* four struts, as the car's own screen draws them: centre is normal ride height */
+.hud-recovery .struts {
+  display: flex;
+  gap: 3px;
+  align-items: flex-end;
+  height: 22px;
+  margin: 3px 0 4px;
+}
+.hud-recovery .struts i {
+  flex: 1;
+  height: 50%;
+  background: linear-gradient(to top, #3a6d8c, var(--accent));
+  border-radius: 1px;
+  transition: height 60ms linear;
+}
+
+.hud-surface { margin-top: 8px; }
+.hud-surface[hidden] { display: none; }
+.hud-surface label { color: var(--warn); letter-spacing: 0.12em; font-size: 8px; }
+.hud-surface .bar { background: #161c24; border-radius: 2px; height: 4px; overflow: hidden; }
+.hud-surface .bar i { display: block; width: 0; height: 100%; background: var(--warn); transition: width 120ms linear; }
+.hud-surface .bar i.bad { background: var(--bad); }
 
 .hud-foot { display: flex; justify-content: space-between; margin-top: 8px; font-size: 9px; color: var(--dim); }
 .hud-notice {

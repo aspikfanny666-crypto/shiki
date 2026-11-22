@@ -155,7 +155,7 @@ const buildPhysics = () => (rapierReady
 
 let physics = buildPhysics();
 let lights = new VehicleLights(visual, { settings });
-const recovery = new RecoveryMode(physics, car);
+const recovery = new RecoveryMode(physics, car, { settings });
 const audio = new EngineAudio({ settings, engine: car.tuning.engine });
 const SPAWN = new Vector3(0, rapierReady ? 0.08 : 0, 0);
 physics.reset(SPAWN);
@@ -228,11 +228,13 @@ const controls = new Controls(container, {
   },
   onReverse: (on) => physics.requestReverse(on),
   onRecovery: () => {
-    if (!recovery.supported) {
-      hud.setNotice('this car has no free-driving assist — try the GLS 600', 5);
+    const was = recovery.active;
+    const on = recovery.toggle(physics.telemetry);
+    if (!was && !on) {
+      // it refused; say which condition was not met rather than doing nothing
+      hud.setNotice(recovery.blocked || 'free-driving assist unavailable', 5);
       return;
     }
-    const on = recovery.toggle();
     hud.setNotice(on ? 'free-driving assist — give it throttle while it rocks' : '', 5);
   },
 });
@@ -390,6 +392,7 @@ renderer.setAnimationLoop(() => {
   controls.setSoundState(soundOn);
   const recoveryStatus = recovery.status;
   controls.setRecoveryState(recoveryStatus);
+  audio.updateRecovery(recoveryStatus);
   hud.update(t, {
     fps,
     camera: rig.mode,

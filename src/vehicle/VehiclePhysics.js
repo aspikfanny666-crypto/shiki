@@ -1,5 +1,6 @@
 import { Euler, Quaternion, Vector3 } from 'three';
 import { VEHICLE_TUNING } from '../vehicleConfig.js';
+import { terrain, SURFACES } from '../scene/Terrain.js';
 import { Drivetrain } from './Drivetrain.js';
 
 /**
@@ -54,6 +55,17 @@ export class VehiclePhysics {
     this.forceReverse = false;
 
     this.spawn = { position: new Vector3(0, 0.08, 0), rotation: new Quaternion() };
+    /**
+     * Per wheel: how far it has dug itself into loose ground, 0 … 1, and what
+     * it is standing on. Only meaningful on a surface Terrain calls loose.
+     */
+    this.wheelSink = [0, 0, 0, 0];
+    this.wheelSurface = [SURFACES.asphalt, SURFACES.asphalt, SURFACES.asphalt, SURFACES.asphalt];
+    /** Slow average of each wheel's suspension force, for the peak detector. */
+    this.wheelLoadAvg = [0, 0, 0, 0];
+    this.digging = false;
+    this.packing = 0;
+    this.cornerLoad = (tuning.mass * 9.81) / 4;
     this.#create();
   }
 
@@ -285,6 +297,7 @@ export class VehiclePhysics {
     }
 
     // ---- resistive forces on the chassis ------------------------------------
+    this.#updateTerrain(dt, speed, drive.engineForce);
     const { dragN, rollingN } = this.#applyResistance(dt, speed, wheelsOnGround);
 
     controller.updateVehicle(dt, undefined, undefined, this._rayFilter);
@@ -320,8 +333,116 @@ export class VehiclePhysics {
       brake: input.brake,
       handbrake: input.handbrake,
       airborne: wheelsOnGround === 0,
+      surface: this.surfaceLabel,
+      stuck: this.stuckness,
+      digging: this.digging,
     };
     return this.telemetry;
+  }
+
+  /**
+   * Loose ground, per wheel, per step.
+   *
+   * Three things happen here, and they are the reason Recovery Mode is worth
+   * having rather than being an animation:
+   *
+   *  1. A loose surface cuts the tyre's grip outright (sand is about half).
+   *  2. A wheel that is driving hard while the car is not moving DIGS IN. The
+   *     sim has no independent wheel-spin state — the drivetrain derives wheel
+   *     speed from road speed — so "spinning" is taken as "lots of engine force
+   *     and almost no road speed", which is the same situation a player is in
+   *     when they bury a car.
+   *  3. A load peak PACKS IT BACK DOWN. Any peak does: a kerb, a bump, or the
+   *     GLS pumping its suspension. That is deliberately not special-cased to
+   *     Recovery Mode — the assist earns its effect through the physics rather
+   *     than being handed one.
+   *
+   * @param {number} dt
+   * @param {number} speed road speed, m/s
+   * @param {number} engineForce current drive force, N
+   */
+  #updateTerrain(dt, speed, engineForce) {
+    const peakLoad = this.cornerLoad * 1.3;
+
+    /**
+     * A wheel digs in when it is slipping, and it slips when the drivetrain
+     * asks for more force than the tyre can transmit. That is a real test, not
+     * a proxy: available traction is the friction coefficient times the load
+     * on the driven wheels, and the drive force is a number the drivetrain
+     * already computed. Below the limit the car just drives across the sand;
+     * above it, the wheels spin and the hole starts.
+     *
+     * An earlier version keyed this off "throttle down and road speed near
+     * zero", which never fired — the car accelerated past the threshold in a
+     * third of a second and sailed out of the pit having dug nothing.
+     */
+    let driven = 0;
+    let traction = 0;
+    for (let i = 0; i < this.wheelKeys.length; i++) {
+      if (!this.isDriven(this.wheelKeys[i])) continue;
+      driven += 1;
+      const surface = this.wheelSurface[i];
+      traction += this.tuning.tyre.frictionSlip * surface.grip * (1 - 0.75 * this.wheelSink[i]) * this.cornerLoad;
+    }
+    const digging = driven > 0 && Math.abs(speed) < 8 && Math.abs(engineForce) > traction;
+    this.digging = digging;
+    this.packing = Math.max(0, this.packing - dt * 4);
+
+    for (let i = 0; i < this.wheelKeys.length; i++) {
+      let surface = SURFACES.asphalt;
+      if (this.controller.wheelIsInContact(i)) {
+        const p = this.controller.wheelContactPoint(i);
+        if (p) surface = terrain.surfaceAt(p.x, p.z);
+      }
+      this.wheelSurface[i] = surface;
+
+      const load = this.controller.wheelSuspensionForce?.(i) ?? 0;
+      /**
+       * A PEAK is a load well above what this corner has been carrying
+       * lately, not above its static share. Squat under acceleration raises
+       * the rear corners for seconds at a time, and an earlier version read
+       * that as a continuous hammering: it packed the sand as fast as the
+       * wheels dug it, and `sink` sat at exactly zero for the whole run. A
+       * low-pass of the corner's own load gives a baseline that squat moves
+       * with, so only genuine strikes — a kerb, a bump, the GLS pumping its
+       * suspension — count.
+       */
+      const avg = this.wheelLoadAvg[i] || load;
+      this.wheelLoadAvg[i] = avg + (load - avg) * Math.min(1, dt * 2.5);
+      const peak = load > this.wheelLoadAvg[i] * 1.3 && load > this.cornerLoad * 0.8;
+
+      let sink = this.wheelSink[i];
+      if (surface.loose) {
+        if (digging) sink += surface.sinkRate * dt;
+        if (peak) {
+          sink -= surface.compaction * dt * Math.min(2.5, load / Math.max(1, this.wheelLoadAvg[i]));
+          this.packing = 1;
+        }
+        // and simply rolling over it packs it a little too
+        if (Math.abs(speed) > 1.5) sink -= 0.08 * dt;
+      } else {
+        // back on tarmac: the hole is behind you
+        sink -= 1.5 * dt;
+      }
+      this.wheelSink[i] = Math.max(0, Math.min(1, sink));
+
+      const grip = this.tuning.tyre.frictionSlip * surface.grip * (1 - 0.75 * this.wheelSink[i]);
+      this.controller.setWheelFrictionSlip(i, grip);
+    }
+  }
+
+  /** Mean sink across the four wheels, for the HUD. */
+  get stuckness() {
+    let sum = 0;
+    for (const s of this.wheelSink) sum += s;
+    return sum / Math.max(1, this.wheelKeys.length);
+  }
+
+  /** The surface most of the wheels are on, for the HUD. */
+  get surfaceLabel() {
+    let loose = 0;
+    for (let i = 0; i < this.wheelKeys.length; i++) if (this.wheelSurface[i].loose) loose++;
+    return loose >= 2 ? this.wheelSurface.find((s) => s.loose)?.label ?? 'asphalt' : 'asphalt';
   }
 
   /** Inner wheel turns more than the outer one, from the measured track/wheelbase. */
@@ -372,7 +493,13 @@ export class VehiclePhysics {
     // rolling resistance: constant retarding force while wheels touch ground
     let rollingN = 0;
     if (wheelsOnGround > 0 && Math.abs(speed) > 0.08) {
-      rollingN = this.tuning.tyre.rollingResistance * this.tuning.mass * 9.81 * (wheelsOnGround / 4);
+      // loose ground drags far more than tarmac, and a dug-in wheel more again
+      let extra = 0;
+      for (let i = 0; i < this.wheelKeys.length; i++) {
+        extra += this.wheelSurface[i].rolling * (0.35 + this.wheelSink[i]);
+      }
+      const coefficient = this.tuning.tyre.rollingResistance + extra / Math.max(1, this.wheelKeys.length);
+      rollingN = coefficient * this.tuning.mass * 9.81 * (wheelsOnGround / 4);
       const rot = this.body.rotation();
       this._q.set(rot.x, rot.y, rot.z, rot.w);
       this._fwd.set(0, 0, -1).applyQuaternion(this._q).multiplyScalar(-Math.sign(speed) * rollingN);
@@ -424,6 +551,8 @@ export class VehiclePhysics {
    * is flipped or wedged.
    */
   reset(position = this.spawn.position, heading = 0) {
+    this.wheelSink = [0, 0, 0, 0];
+    this.wheelLoadAvg = [0, 0, 0, 0];
     this.body.setTranslation({ x: position.x, y: position.y, z: position.z }, true);
     this._q.setFromEuler(this._euler.set(0, heading, 0));
     this.body.setRotation({ x: this._q.x, y: this._q.y, z: this._q.z, w: this._q.w }, true);

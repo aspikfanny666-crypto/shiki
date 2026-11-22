@@ -35,9 +35,13 @@ export class Hud {
         <span class="lamp" data-lamp-rec>REC</span>
       </div>
       <div class="hud-recovery" data-recovery hidden>
-        <label>FREE-DRIVING ASSIST</label>
+        <label>FREE-DRIVING ASSIST <b data-recovery-state></b></label>
+        <div class="struts">
+          <i data-strut="0"></i><i data-strut="1"></i><i data-strut="2"></i><i data-strut="3"></i>
+        </div>
         <div class="bar"><i data-recovery-fill></i></div>
       </div>
+      <div class="hud-surface" data-surface hidden><label>SAND</label><div class="bar"><i data-sink></i></div></div>
       <div class="hud-foot"><span data-cam>chase</span><span data-audio>snd —</span><span data-fps>60 fps</span></div>
       <div class="hud-notice" data-notice hidden></div>
       <button class="hud-sound" data-sound hidden>🔊 TAP FOR SOUND</button>`;
@@ -125,15 +129,61 @@ export class Hud {
       row.hidden = !show;
     }
     if (!show) return;
-    const pct = Math.round((status.remaining ?? 0) * 100);
-    if (this._last.recPct === pct) return;
-    this._last.recPct = pct;
-    const fill = this.el.querySelector('[data-recovery-fill]');
+
+    // the countdown is hydraulic heat: full bar is cold, empty is about to stop
+    const pct = Math.round((1 - (status.heat ?? 0)) * 100);
+    if (this._last.recPct !== pct) {
+      this._last.recPct = pct;
+      const fill = this.el.querySelector('[data-recovery-fill]');
+      if (fill) {
+        fill.style.width = `${pct}%`;
+        fill.classList.toggle('ready', pct > 25);
+      }
+    }
+    const state = status.state === 'in' ? 'raising' : status.state === 'out' ? 'settling' : '';
+    this.#text2('[data-recovery-state]', state);
+
+    /**
+     * Four bars, one per strut, exactly as the car's own screen shows them.
+     * Centre is the normal ride height; they run up as the body lifts.
+     */
+    const corners = status.corners ?? [];
+    for (let i = 0; i < 4; i++) {
+      const el = this.el.querySelector(`[data-strut="${i}"]`);
+      if (!el) continue;
+      const h = Math.round(Math.max(0, Math.min(1, (corners[i] ?? 0) / 0.16 + 0.5)) * 100);
+      if (this._last[`strut${i}`] === h) continue;
+      this._last[`strut${i}`] = h;
+      el.style.height = `${h}%`;
+    }
+  }
+
+  /** Loose ground, and how far the wheels have dug into it. */
+  #surface(t) {
+    const row = this.el.querySelector('[data-surface]');
+    if (!row) return;
+    const loose = (t.surface ?? 'asphalt') !== 'asphalt';
+    if (this._last.surfShown !== loose) {
+      this._last.surfShown = loose;
+      row.hidden = !loose;
+      const label = row.querySelector('label');
+      if (label) label.textContent = String(t.surface ?? '').toUpperCase();
+    }
+    if (!loose) return;
+    const pct = Math.round((t.stuck ?? 0) * 100);
+    if (this._last.sinkPct === pct) return;
+    this._last.sinkPct = pct;
+    const fill = row.querySelector('[data-sink]');
     if (fill) {
       fill.style.width = `${pct}%`;
-      // lit on the lift, dim on the drop, so the bar shows the car pumping
-      fill.classList.toggle('ready', (status.lift ?? 0) > 0);
+      fill.classList.toggle('bad', pct > 55);
     }
+  }
+
+  #text2(sel, value) {
+    const el = this.el.querySelector(sel);
+    if (!el || el.textContent === value) return;
+    el.textContent = value;
   }
 
   #lamp(ref, on, cls = 'on') {
@@ -191,6 +241,7 @@ export class Hud {
     this.#lamp('air', (t.wheelsOnGround ?? 4) < 4);
     this.#lamp('rec', Boolean(recovery?.active));
     this.#recovery(recovery);
+    this.#surface(t);
 
     this.#text('cam', camera);
     this.#text('fps', `${Math.round(fps)} fps`);
